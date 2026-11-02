@@ -1,5 +1,8 @@
 fastapi>=0.115
 uvicorn[standard]>=0.34
-eero-api>=4.1.0
+# eero-api 8.x renamed or removed a dozen client methods this app relies on
+# (profile schedule, blocked apps, activity, SQM, device priority). Stay on the
+# 4.x-7.x API surface; backend/tests/test_client_surface.py guards this.
+eero-api>=4.1.0,<8
 python-dotenv>=1.0
 httpx>=0.28.1

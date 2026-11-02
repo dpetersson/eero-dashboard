@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Pin `eero-api<8`. eero-api 8.x removed or renamed a dozen client methods, which broke profile schedules and bedtime, blocked apps (shown as "may require eero Plus"), the activity views, SQM controls and device priority with HTTP 500s. Whole-network reboot, which only exists in 8.x, now returns 501 with a clear message instead of crashing. `tests/test_client_surface.py` fails if the installed library ever lacks a method the app calls.
+
 ### Added
 - **Watch** tab (`features/watch`): SQLite device inventory with a trusted baseline, new-device and returned-device events, a 24h steady-upload rule, webhook alerts (Slack or ntfy), an optional nmap camera-port probe, and trust/label/block/forget actions. See `docs/watch.md`.
 - LAN cross-reference: built-in ARP sweep (`features/watch/lanscan.py`, `WATCH_LAN_SCAN`), ingest endpoint for sweeps pushed by `netscan.py`, OUI vendor fill-in, subnet-aware comparison of eero's list against what answers on the wire, `new_device_lan` events.

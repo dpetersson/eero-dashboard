@@ -98,6 +98,14 @@ async def get_updates(client: EeroClient, network_id: str):
 async def reboot_network(client: EeroClient, network_id: str):
     if is_dry_run():
         block_unmocked_mutation("reboot_network")
+    if not hasattr(client, "reboot_network"):
+        # Whole-network reboot only exists in eero-api 8+, which drops other methods
+        # this app needs. Nodes can still be rebooted one at a time from the node drawer.
+        from fastapi import HTTPException
+        raise HTTPException(status_code=501, detail={
+            "code": "reboot_network_unavailable",
+            "message": "Whole-network reboot is not available with this eero-api version; reboot nodes individually.",
+        })
     with translate_errors(code="reboot_network_failed", message="Failed to reboot network"):
         resp = await client.reboot_network(network_id=network_id)
         return resp.get("data", resp)
