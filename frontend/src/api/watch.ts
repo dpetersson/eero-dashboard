@@ -41,11 +41,22 @@ export interface WatchDevice {
   device_type: string;
   connection: string;
   device_url: string;
+  lan_last_seen: string;
+  lan_ip: string;
+  lan_hostname: string;
+  lan_source: string;
+  oui_vendor: string;
+  make_model: string;
+  ssid: string;
+  segment: string;
+  first_source: 'eero' | 'lan';
   probe: WatchProbe | null;
   probe_at: string | null;
   display_name?: string;
+  vendor?: string;
   is_new?: boolean;
   online?: boolean;
+  lan_online?: boolean;
   upload?: WatchUpload | null;
   samples?: { seen_at: string; ip: string; up: number | null; down: number | null }[];
 }
@@ -59,7 +70,28 @@ export interface WatchEvent {
   detail: string;
 }
 
+export interface LanScanInfo {
+  at: string;
+  source: string;
+  cidr: string;
+  count: number;
+  gateway_mac: string;
+  scanner_ip: string;
+}
+
+export interface WatchCross {
+  available: boolean;
+  builtin_enabled: boolean;
+  oui_loaded: boolean;
+  last_scan: LanScanInfo | null;
+  both: number;
+  eero_only: number;
+  lan_only: WatchDevice[];
+  vendor_filled: number;
+}
+
 export interface WatchSummary {
+  cross: WatchCross;
   counts: { total: number; online: number; untrusted: number; untrusted_online: number; new: number };
   untrusted: WatchDevice[];
   new: WatchDevice[];
@@ -72,6 +104,8 @@ export interface WatchSummary {
     probe_available: boolean;
     lan_only: boolean;
     allowed_cidrs: string[];
+    lan_scan_enabled: boolean;
+    lan_scan_seconds: number;
   };
 }
 
@@ -109,3 +143,9 @@ export const runWatchPoll = (networkId: string) =>
 
 export const trustAllWatch = (networkId: string) =>
   request<{ trusted: number }>(`/networks/${networkId}/watch/baseline`, { method: 'POST' });
+
+export const runLanScan = (networkId: string) =>
+  request<{ scanned_at?: string; count?: number; new?: string[]; skipped?: boolean; reason?: string }>(
+    `/networks/${networkId}/watch/lan-scan/run`, { method: 'POST' });
+
+export const updateOui = () => request<{ bytes: number }>('/watch/oui/update', { method: 'POST' });

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Watch** tab (`features/watch`): SQLite device inventory with a trusted baseline, new-device and returned-device events, a 24h steady-upload rule, webhook alerts (Slack or ntfy), an optional nmap camera-port probe, and trust/label/block/forget actions. See `docs/watch.md`.
+- LAN cross-reference: built-in ARP sweep (`features/watch/lanscan.py`, `WATCH_LAN_SCAN`), ingest endpoint for sweeps pushed by `netscan.py`, OUI vendor fill-in, subnet-aware comparison of eero's list against what answers on the wire, `new_device_lan` events.
 - `core/lan_guard.py`: rejects `/api/*` requests from non-private source addresses (`WATCH_LAN_ONLY`, `WATCH_ALLOWED_CIDRS`).
 - Demo mode exercises the Watch tab against the synthetic device list; `/watch/*` mutations bypass the demo no-op short-circuit.
 

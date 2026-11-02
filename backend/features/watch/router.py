@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from . import poller, schemas, service, store
+from . import lanscan, poller, schemas, service, store
 
 router = APIRouter(prefix="/api", tags=["watch"])
 
@@ -68,6 +68,60 @@ async def watch_probe(network_id: str, mac: str):
         raise HTTPException(status_code=501, detail=result["error"])
     store.add_event(network_id, "probe", rec["mac"], result.get("verdict") or result.get("error", ""))
     return result
+
+
+# --------------------------------------------------------------------------- LAN scans
+
+@router.get("/networks/{network_id}/watch/lan-scan")
+async def lan_scan_status(network_id: str):
+    return {
+        "available": lanscan.available(),
+        "builtin_enabled": service.config.lan_scan(),
+        "oui_loaded": lanscan.oui_available(),
+        "last_scan": store.get_meta("lan_scan:%s" % network_id),
+        "home_gateway_mac": store.get_meta("home_gateway_mac"),
+    }
+
+
+@router.post("/networks/{network_id}/watch/lan-scan/run")
+async def lan_scan_run(network_id: str):
+    """Sweep the subnet this backend sits on and merge it. Takes 10-30 s on a /24."""
+    if not lanscan.available():
+        raise HTTPException(status_code=501, detail="This host cannot sweep: no ping binary or no default route")
+    result = await poller.lan_scan_once(network_id)
+    if result is None:
+        raise HTTPException(status_code=409, detail="No network id known yet")
+    result.pop("events", None)
+    return result
+
+
+@router.post("/networks/{network_id}/watch/lan-scan")
+async def lan_scan_ingest(network_id: str, scan: schemas.LanScanPush):
+    """Accept a sweep pushed by netscan.py from another machine on the LAN."""
+    result = service.ingest_lan_scan(network_id, scan.model_dump(), scan.source)
+    result.pop("events", None)
+    return result
+
+
+@router.post("/watch/lan-scan")
+async def lan_scan_ingest_default(scan: schemas.LanScanPush):
+    """Same as above without a network id; uses the network the eero poller last saw."""
+    network_id = service.default_network_id()
+    if not network_id:
+        raise HTTPException(status_code=409, detail="No network id known yet; log in to the dashboard first or set WATCH_NETWORK_ID")
+    result = service.ingest_lan_scan(network_id, scan.model_dump(), scan.source)
+    result.pop("events", None)
+    result["network_id"] = network_id
+    return result
+
+
+@router.post("/watch/oui/update")
+async def oui_update():
+    try:
+        size = lanscan.update_oui()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail="OUI download failed: %s" % e)
+    return {"bytes": size}
 
 
 def _device_or_404(mac: str) -> dict:

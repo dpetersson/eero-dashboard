@@ -12,6 +12,10 @@ WATCH_UPLOAD_RATIO   default 0.9    - fraction of 24h samples uploading to flag 
 WATCH_UPLOAD_SAMPLES default 12     - minimum samples in 24h before the rule applies
 WATCH_LAN_ONLY       default true   - reject API requests from non-private addresses
 WATCH_ALLOWED_CIDRS  default unset  - comma list of CIDRs; when set, only these may use the API
+WATCH_LAN_SCAN       default false  - run the built-in ARP sweep from this host (needs host networking)
+WATCH_LAN_SCAN_SECONDS default 900  - seconds between built-in sweeps
+WATCH_LAN_SCAN_SUBNET default auto  - CIDR to sweep instead of the detected one
+WATCH_NETWORK_ID     default unset  - eero network id to attach LAN scans to (auto after first eero poll)
 """
 
 from __future__ import annotations
@@ -79,3 +83,19 @@ def lan_only() -> bool:
 def allowed_cidrs() -> list[str]:
     raw = os.environ.get("WATCH_ALLOWED_CIDRS", "")
     return [c.strip() for c in raw.split(",") if c.strip()]
+
+
+def lan_scan() -> bool:
+    return _bool("WATCH_LAN_SCAN", False)
+
+
+def lan_scan_seconds() -> int:
+    return max(60, _int("WATCH_LAN_SCAN_SECONDS", 900))
+
+
+def lan_scan_subnet() -> str | None:
+    return os.environ.get("WATCH_LAN_SCAN_SUBNET") or None
+
+
+def network_id() -> str | None:
+    return os.environ.get("WATCH_NETWORK_ID") or None

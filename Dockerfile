@@ -11,7 +11,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # nmap for the Watch tab's optional camera-port probe (small, no root needed at runtime)
-RUN apt-get update && apt-get install -y --no-install-recommends nmap && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends nmap iputils-ping iproute2 dnsutils && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
 COPY backend/requirements.txt /app/backend/requirements.txt

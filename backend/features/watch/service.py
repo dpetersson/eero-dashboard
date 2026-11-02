@@ -8,13 +8,14 @@ events of type ``new_device`` and ``steady_upload``.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from . import config, probe, store
+from . import config, lanscan, probe, store
 
 logger = logging.getLogger("eero.watch")
 
@@ -65,7 +66,21 @@ def _ip(device: dict) -> str:
     return str(ip or "")
 
 
+def _segment(device: dict) -> str:
+    if device.get("is_guest"):
+        return "guest"
+    for key in ("vlan_name", "subnet_kind"):
+        v = device.get(key)
+        if v and str(v).lower() not in ("main", "primary", "default"):
+            return str(v)
+    return ""
+
+
 def _fields(device: dict) -> dict[str, Any]:
+    make = " ".join(str(device.get(k) or "") for k in ("inferred_make", "inferred_model")).strip()
+    if not make and device.get("model_name"):
+        make = str(device["model_name"])
+    mac = norm_mac(device.get("mac"))
     return {
         "ip": _ip(device),
         "hostname": device.get("hostname") or "",
@@ -74,6 +89,10 @@ def _fields(device: dict) -> dict[str, Any]:
         "device_type": device.get("device_type") or "",
         "connection": device.get("connection_type") or ("wireless" if device.get("wireless") else ""),
         "device_url": device.get("url") or "",
+        "make_model": make,
+        "ssid": device.get("ssid") or "",
+        "segment": _segment(device),
+        "oui_vendor": lanscan.vendor_for(mac) if mac else "",
     }
 
 
@@ -82,8 +101,41 @@ def _is_connected(device: dict) -> bool:
     return True if c is None else bool(c)
 
 
+def nodes_as_devices(nodes: list[dict]) -> list[dict]:
+    """eero lists its own hardware under /eeros, not /devices. Fold the nodes in so a
+    LAN sweep does not report the gateway as an unknown device."""
+    out = []
+    for n in nodes or []:
+        mac = n.get("mac_address") or n.get("mac")
+        if not mac:
+            continue
+        location = n.get("location") or n.get("nickname") or n.get("model") or "eero"
+        out.append({
+            "mac": mac,
+            "ip": n.get("ip_address") or n.get("ip") or "",
+            "hostname": "",
+            "nickname": "eero %s" % location,
+            "manufacturer": "eero",
+            "device_type": "eero_node",
+            "connection_type": n.get("connection_type") or ("wired" if n.get("wired") else "mesh"),
+            "connected": str(n.get("status") or "green").lower() in ("green", "connected", "online", "true"),
+            "url": n.get("url") or "",
+            "inferred_make": "eero",
+            "inferred_model": n.get("model") or "",
+            "_watch_role": "eero_node",
+        })
+    return out
+
+
 def display_name(rec: dict) -> str:
-    return rec.get("name") or rec.get("nickname") or rec.get("hostname") or rec.get("manufacturer") or rec["mac"]
+    return (rec.get("name") or rec.get("nickname") or rec.get("hostname") or rec.get("lan_hostname")
+            or rec.get("manufacturer") or rec.get("make_model") or rec.get("oui_vendor") or rec["mac"])
+
+
+def best_vendor(rec: dict) -> str:
+    """eero's manufacturer first, then its inferred make/model, then the OUI table."""
+    v = rec.get("manufacturer") or rec.get("make_model") or rec.get("oui_vendor") or ""
+    return v
 
 
 # --------------------------------------------------------------------------- alerts
@@ -114,8 +166,9 @@ def poll(network_id: str, devices: list[dict], *, first_run_trusts: bool = True)
     recorded as trusted when ``first_run_trusts`` is set: that is the baseline.
     """
     seen_at = store.now_iso()
+    store.set_meta("network_id", network_id)
     known = {d["mac"]: d for d in store.list_devices(network_id)}
-    first_run = not known
+    first_run = not any(d.get("first_source", "eero") == "eero" for d in known.values())
     new, returned, sightings = [], [], []
     absent_days = config.absent_days()
     now = datetime.now(timezone.utc)
@@ -133,7 +186,13 @@ def poll(network_id: str, devices: list[dict], *, first_run_trusts: bool = True)
         up, down = _usage(dev)
         sightings.append((mac, seen_at, fields["ip"], up, down))
 
-        if created and not first_run:
+        if first_run and first_run_trusts and prev is not None and not prev.get("trusted"):
+            # Seen by a LAN sweep before the first eero poll: part of the baseline too.
+            store.label_device(mac, trusted=True)
+        elif dev.get("_watch_role") == "eero_node" and (created or not prev.get("trusted")) and not (prev or {}).get("name"):
+            # eero's own hardware is trusted by definition; no new-device alert for it.
+            store.label_device(mac, trusted=True)
+        elif created and not first_run:
             new.append(mac)
         elif prev and absent_days:
             try:
@@ -147,6 +206,7 @@ def poll(network_id: str, devices: list[dict], *, first_run_trusts: bool = True)
 
     events = []
     if first_run:
+        store.set_meta("baseline_at:%s" % network_id, seen_at)
         events.append(store.add_event(network_id, "baseline", "", "%d devices recorded as the baseline" % len(sightings)))
 
     for mac in new:
@@ -209,18 +269,138 @@ def _apply_upload_rule(network_id: str) -> list[dict]:
     return events
 
 
+# --------------------------------------------------------------------------- LAN scans
+
+def ingest_lan_scan(network_id: str, scan: dict, source: str | None = None) -> dict[str, Any]:
+    """Merge a LAN sweep (built-in or pushed by netscan.py) into the inventory.
+
+    Devices not known at all are created untrusted with first_source=lan and
+    raise a ``new_device_lan`` event: something answers on the wire that eero
+    has never reported. That is worth a look even if it turns out benign.
+    """
+    seen_at = store.now_iso()
+    source = source or scan.get("source") or "lan"
+    net = scan.get("network") or {}
+    cidr = net.get("cidr") or ""
+    # eero nodes answer ARP with a different MAC than eero reports for them. Match the
+    # wire-side interface by the node's IP, or by eero's OUI plus its eero-xxxx hostname.
+    known = store.list_devices(network_id)
+    node_by_ip = {d["last_ip"]: d for d in known if d.get("device_type") == "eero_node" and d.get("last_ip")}
+    node_macs = {d["mac"] for d in known if d.get("device_type") == "eero_node"}
+    new, rows = [], []
+    for d in scan.get("devices") or []:
+        mac = norm_mac(d.get("mac"))
+        if not mac:
+            continue
+        ip = str(d.get("ip") or "")
+        hostname = str(d.get("hostname") or "")
+        vendor = str(d.get("vendor") or "") or lanscan.vendor_for(mac)
+        if vendor.startswith("(randomised"):
+            vendor = ""
+        created = store.upsert_lan_device(mac, network_id, seen_at, ip, hostname, vendor, source)
+        rows.append((mac, seen_at, ip, hostname, vendor, source))
+        node = node_by_ip.get(ip)
+        looks_like_node = vendor.lower().startswith("eero") and hostname.lower().startswith("eero-")
+        if mac not in node_macs and (node or looks_like_node):
+            rec = store.get_device(mac) or {}
+            if created or not rec.get("trusted"):
+                label = "%s (LAN interface)" % (node.get("nickname") or node.get("name") or "eero") if node else "eero node (LAN interface)"
+                store.mark_eero_node(mac, label)
+            continue
+        if created:
+            new.append(mac)
+    store.add_lan_sightings(rows)
+    store.set_meta("lan_scan:%s" % network_id, {
+        "at": seen_at, "source": source, "cidr": cidr, "count": len(rows),
+        "gateway_mac": net.get("gateway_mac") or "", "scanner_ip": net.get("scanner_ip") or "",
+    })
+
+    events = []
+    for mac in new:
+        rec = store.get_device(mac) or {"mac": mac}
+        detail = "%s  %s  %s  (on the wire via %s, never reported by eero)" % (
+            rec.get("lan_ip", ""), rec.get("oui_vendor") or "unknown vendor", rec.get("lan_hostname") or "", source)
+        events.append(store.add_event(network_id, "new_device_lan", mac, detail.strip()))
+        send_webhook("Device on LAN not reported by eero", "%s  %s" % (mac, detail.strip()))
+    logger.info("watch lan scan %s from %s: %d devices, %d unknown to eero", network_id, source, len(rows), len(new))
+    return {"scanned_at": seen_at, "source": source, "cidr": cidr, "count": len(rows), "new": new, "events": events}
+
+
+def default_network_id() -> str | None:
+    return config.network_id() or store.get_meta("network_id")
+
+
+def _cross_reference(network_id: str, devices: list[dict]) -> dict[str, Any]:
+    last = store.get_meta("lan_scan:%s" % network_id)
+    out: dict[str, Any] = {
+        "available": lanscan.available(),
+        "builtin_enabled": config.lan_scan(),
+        "oui_loaded": lanscan.oui_available(),
+        "last_scan": last,
+        "both": 0, "eero_only": 0, "lan_only": [], "vendor_filled": 0,
+    }
+    if not last:
+        return out
+    try:
+        net = ipaddress.ip_network(last["cidr"]) if last.get("cidr") else None
+    except ValueError:
+        net = None
+    now = datetime.now(timezone.utc)
+    lan_window = now - timedelta(seconds=config.lan_scan_seconds() * 2 + 120)
+
+    def in_subnet(ip: str) -> bool:
+        if net is None or not ip:
+            return True
+        try:
+            return ipaddress.ip_address(ip) in net
+        except ValueError:
+            return False
+
+    for d in devices:
+        lan_recent = False
+        if d.get("lan_last_seen"):
+            try:
+                lan_recent = store.parse_iso(d["lan_last_seen"]) >= lan_window
+            except ValueError:
+                pass
+        d["lan_online"] = lan_recent
+        eero_on_subnet = d.get("online") and in_subnet(d.get("last_ip", ""))
+        if d.get("device_type") == "eero_node":
+            # Nodes are reported by eero under /eeros; their wire-side interface counts as matched.
+            if lan_recent or eero_on_subnet:
+                out["both"] += 1
+            continue
+        if lan_recent and eero_on_subnet:
+            out["both"] += 1
+        elif lan_recent and (d.get("first_source") == "lan" or not d.get("online")):
+            out["lan_only"].append(d)
+        elif eero_on_subnet and not lan_recent:
+            out["eero_only"] += 1
+        if not d.get("manufacturer") and (d.get("oui_vendor") or d.get("make_model")):
+            out["vendor_filled"] += 1
+    return out
+
+
 def summary(network_id: str) -> dict[str, Any]:
     devices = store.list_devices(network_id)
     now = datetime.now(timezone.utc)
     new_cutoff = now - timedelta(days=config.new_days())
     online_cutoff = now - timedelta(seconds=config.poll_seconds() * 2 + 60)
     stats = store.upload_stats(network_id, hours=24)
+    baseline_at = store.get_meta("baseline_at:%s" % network_id)
+    if not baseline_at:  # inventories created before this key existed: use the baseline event
+        ev = [e for e in store.list_events(network_id, limit=1000) if e["type"] == "baseline"]
+        baseline_at = ev[-1]["at"] if ev else None
 
     for d in devices:
         d["display_name"] = display_name(d)
+        d["vendor"] = best_vendor(d)
         try:
-            d["is_new"] = store.parse_iso(d["first_seen"]) >= new_cutoff
-            d["online"] = store.parse_iso(d["last_seen"]) >= online_cutoff
+            first = store.parse_iso(d["first_seen"])
+            # "New" means joined after the baseline, not "baseline was taken recently".
+            d["is_new"] = (d.get("device_type") != "eero_node" and first >= new_cutoff
+                           and (not baseline_at or first > store.parse_iso(baseline_at)))
+            d["online"] = bool(d.get("last_seen")) and store.parse_iso(d["last_seen"]) >= online_cutoff
         except ValueError:
             d["is_new"] = d["online"] = False
         s = stats.get(d["mac"])
@@ -235,7 +415,9 @@ def summary(network_id: str) -> dict[str, Any]:
     new = [d for d in devices if d["is_new"]]
     uploaders = sorted((d for d in devices if d["upload"] and d["upload"]["samples"] >= config.upload_samples()),
                        key=lambda d: (d["upload"]["ratio"], d["upload"]["median_up"]), reverse=True)[:10]
+    cross = _cross_reference(network_id, devices)
     return {
+        "cross": cross,
         "counts": {
             "total": len(devices),
             "online": sum(1 for d in devices if d["online"]),
@@ -254,6 +436,8 @@ def summary(network_id: str) -> dict[str, Any]:
             "probe_available": probe.available(),
             "lan_only": config.lan_only(),
             "allowed_cidrs": config.allowed_cidrs(),
+            "lan_scan_enabled": config.lan_scan(),
+            "lan_scan_seconds": config.lan_scan_seconds(),
         },
     }
 

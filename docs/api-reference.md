@@ -167,3 +167,8 @@ Local inventory, never proxied to eero. See [watch.md](./watch.md).
 - `GET /networks/{network_id}/watch/events`
 - `POST /networks/{network_id}/watch/poll`
 - `POST /networks/{network_id}/watch/baseline`
+- `GET /networks/{network_id}/watch/lan-scan`
+- `POST /networks/{network_id}/watch/lan-scan/run`
+- `POST /networks/{network_id}/watch/lan-scan`
+- `POST /watch/lan-scan`
+- `POST /watch/oui/update`

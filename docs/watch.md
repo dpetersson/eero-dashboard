@@ -45,6 +45,47 @@ block endpoint.
 - **Poll now** forces a poll. **Trust all** marks the whole inventory trusted,
   useful right after first deployment once you have reviewed the list.
 
+## LAN cross-reference
+
+eero's device list is eero's opinion. The Watch tab keeps a second, independent
+source: an ARP sweep of the subnet, either run by the dashboard itself or pushed
+to it by the standalone `netscan.py`. The sweep pings every address (which
+forces an ARP exchange), reads the ARP table, looks vendors up in the IEEE OUI
+table, and resolves names through reverse DNS and mDNS. No root, no extra
+tools.
+
+What you get from the pairing:
+
+- **Devices on the wire that eero does not list.** Static-IP hosts, a second
+  router, anything behind a non-eero access point, or something eero cannot
+  see. They are created untrusted with `first_source=lan` and raise a
+  `new_device_lan` event (also sent to the webhook).
+- **Vendor names eero leaves blank.** About a quarter of devices arrive with
+  no manufacturer. The OUI prefix fills most of them.
+- **A scanner that keeps working when eero's cloud is unreachable.**
+
+Comparison is subnet-aware: eero devices on other VLANs or the guest network
+are not counted as "silent" when the sweep covered only the main subnet.
+
+Three ways to feed it:
+
+1. **Button.** *LAN scan* in the tab sweeps the subnet the backend is on.
+   Needs `ping` and a default route; the Docker image includes both. Behind a
+   Docker bridge the container only sees its own bridge network, so use
+   `network_mode: host`.
+2. **Schedule.** `WATCH_LAN_SCAN=true` sweeps every `WATCH_LAN_SCAN_SECONDS`
+   (default 15 minutes). The first sweep records the gateway MAC; later sweeps
+   are skipped when the gateway differs, so a laptop running the backend at a
+   coffee shop does not scan the wrong network.
+3. **Push from netscan.py.** On any machine on the LAN:
+   `netscan.py push --url http://<dashboard>:8420`, or `scan --push URL` from
+   its LaunchAgent. It POSTs to `/api/watch/lan-scan`, which attaches the
+   sweep to the network the eero poller last saw.
+
+The OUI table: the image ships nmap's prefix file. For the full IEEE table
+press *Download it* in the tab or `POST /api/watch/oui/update`; it is saved in
+the data volume.
+
 ## Probe
 
 The probe button runs an unprivileged nmap TCP scan of the device against
@@ -102,6 +143,10 @@ management stays with the eero app.
 | `WATCH_UPLOAD_SAMPLES` | `12` | Minimum samples before the rule applies |
 | `WATCH_LAN_ONLY` | `true` | Reject API requests from non-private addresses |
 | `WATCH_ALLOWED_CIDRS` | unset | Comma list of CIDRs allowed when set |
+| `WATCH_LAN_SCAN` | `false` | Sweep the local subnet on a schedule from this host |
+| `WATCH_LAN_SCAN_SECONDS` | `900` | Seconds between built-in sweeps (minimum 60) |
+| `WATCH_LAN_SCAN_SUBNET` | auto | CIDR to sweep instead of the detected one |
+| `WATCH_NETWORK_ID` | unset | eero network id for LAN scans before the first eero poll |
 
 ## API
 
@@ -116,6 +161,11 @@ All under `/api/networks/{network_id}/watch`:
 - `GET /events?limit=100`
 - `POST /poll` force a poll of every network
 - `POST /baseline` mark every known device trusted
+- `GET /lan-scan` last sweep and whether this host can sweep
+- `POST /lan-scan/run` sweep from this host and merge
+- `POST /lan-scan` ingest a sweep pushed by netscan.py
+- `POST /api/watch/lan-scan` same, network resolved server-side
+- `POST /api/watch/oui/update` download the IEEE OUI table
 
 These endpoints read the local inventory, never eero, so they keep working
 in demo mode and the demo middleware lets their mutations through.

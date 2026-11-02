@@ -70,3 +70,7 @@
   .watch-event { grid-template-columns: 1fr; gap: 2px; }
   .watch-table th:nth-child(4), .watch-table td:nth-child(4) { display: none; }
 }
+
+.watch-cross-summary { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 10px; line-height: 1.5; }
+.watch-cross-summary strong { color: var(--text); }
+.watch-cross-summary .btn-text { padding: 0; font-size: inherit; }

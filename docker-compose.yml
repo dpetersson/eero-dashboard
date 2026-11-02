@@ -12,6 +12,7 @@ services:
     environment:
       # - WATCH_ALLOWED_CIDRS=192.168.7.0/24
       # - WATCH_WEBHOOK=https://ntfy.sh/your-private-topic
+      # - WATCH_LAN_SCAN=true
       - SPEED_HISTORY_DAYS=365
     restart: unless-stopped
 

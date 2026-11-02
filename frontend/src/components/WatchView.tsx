@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ShieldAlert, ShieldCheck, RefreshCw, Radar, Ban, Pencil, Trash2 } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, RefreshCw, Radar, Ban, Pencil, Trash2, Network } from 'lucide-react';
 
 import * as api from '../api';
 import { useFetch } from '../hooks/useFetch';
@@ -71,12 +71,17 @@ export default function WatchView({ networkId }: WatchViewProps) {
   const forget = (d: WatchDevice) => run(`forget:${d.mac}`, () => api.forgetWatchDevice(networkId, d.mac));
   const pollNow = () => run('poll', () => api.runWatchPoll(networkId));
   const trustAll = () => run('trust-all', () => api.trustAllWatch(networkId));
+  const lanScan = () => run('lan-scan', async () => {
+    const r = await api.runLanScan(networkId);
+    if (r.skipped) throw new Error(`LAN scan skipped: ${r.reason}`);
+  });
+  const fetchOui = () => run('oui', () => api.updateOui());
 
   if (loading && !data) return <div className="card loading-card"><div className="spinner" /> Loading watch data…</div>;
   if (error && !data) return <div className="card error-card">Watch data unavailable: {error}</div>;
   if (!data) return null;
 
-  const { counts, config } = data;
+  const { counts, config, cross } = data;
 
   return (
     <div className="watch-view">
@@ -98,6 +103,12 @@ export default function WatchView({ networkId }: WatchViewProps) {
           <button className="btn-action btn-sm" onClick={pollNow} disabled={busy === 'poll'}>
             <RefreshCw size={14} /> Poll now
           </button>
+          {cross.available && (
+            <button className="btn-action btn-sm" onClick={lanScan} disabled={busy === 'lan-scan'}
+              title="Ping-sweep the subnet this dashboard host is on and merge the ARP table (10-30 s)">
+              <Network size={14} /> {busy === 'lan-scan' ? 'Scanning…' : 'LAN scan'}
+            </button>
+          )}
           {counts.untrusted > 0 && (
             <button className="btn-action btn-sm" onClick={trustAll} disabled={busy === 'trust-all'} title="Mark every known device trusted">
               <ShieldCheck size={14} /> Trust all
@@ -136,6 +147,50 @@ export default function WatchView({ networkId }: WatchViewProps) {
         />
       </Section>
 
+      <div className="watch-section">
+        <div className="section-header">
+          <h2><Network size={16} />LAN cross-reference <span className={`badge ${cross.lan_only.length ? '' : 'muted'}`}>{cross.lan_only.length}</span></h2>
+        </div>
+        {cross.last_scan ? (
+          <>
+            <p className="watch-cross-summary">
+              Last sweep <span title={cross.last_scan.at}>{ago(cross.last_scan.at)}</span> from <strong>{cross.last_scan.source}</strong>
+              {cross.last_scan.cidr ? ` on ${cross.last_scan.cidr}` : ''}: {cross.last_scan.count} answered on the wire.
+              {' '}<strong>{cross.both}</strong> also reported by eero, <strong>{cross.eero_only}</strong> eero devices on that subnet were silent (usually asleep),
+              {' '}<strong>{cross.lan_only.length}</strong> answered but eero does not list them.
+              {cross.vendor_filled > 0 && <> Vendor filled from the OUI table for {cross.vendor_filled} devices eero left blank.</>}
+              {!cross.oui_loaded && <> No OUI table loaded. <button className="btn-text" onClick={fetchOui} disabled={busy === 'oui'}>Download it</button>.</>}
+            </p>
+            {cross.lan_only.length === 0 ? (
+              <div className="card empty-state">Everything on the wire is also in eero's list.</div>
+            ) : (
+              <div className="card">
+                <DeviceTable
+                  devices={cross.lan_only}
+                  busy={busy}
+                  probeAvailable={config.probe_available}
+                  onTrust={(d) => trust(d, !d.trusted)}
+                  onBlock={block}
+                  onProbe={probe}
+                  onEdit={setEditing}
+                  onForget={forget}
+                />
+                <p className="watch-hint">
+                  These answered ARP during the sweep but eero has never reported them. Static-IP devices, a second router, or something on a
+                  switch behind a non-eero AP land here. So would a device eero cannot see.
+                </p>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="card empty-state">
+            No LAN sweep yet. {cross.available
+              ? 'Press LAN scan above, or set WATCH_LAN_SCAN=true to sweep on a schedule.'
+              : 'This host cannot sweep (no ping or no default route). Push sweeps from netscan.py instead: netscan.py push --url <this dashboard>.'}
+          </div>
+        )}
+      </div>
+
       <Section title="Top uploaders (24h)" count={data.uploaders.length}
         empty="Not enough samples yet. Uploads are evaluated after a few polls.">
         <table className="watch-table">
@@ -147,7 +202,7 @@ export default function WatchView({ networkId }: WatchViewProps) {
               <tr key={d.mac} className={(d.upload?.ratio ?? 0) >= 0.9 ? 'watch-row-warn' : ''}>
                 <td>
                   <div className="watch-name">{d.display_name}</div>
-                  <div className="watch-sub">{d.mac} · {d.manufacturer || 'unknown vendor'}</div>
+                  <div className="watch-sub">{d.mac} · {d.vendor || 'unknown vendor'}</div>
                 </td>
                 <td>{d.upload ? `${d.upload.uploading}/${d.upload.samples} samples (${Math.round(d.upload.ratio * 100)}%)` : '-'}</td>
                 <td>{d.upload ? formatUp(d.upload.median_up) : '-'}</td>
@@ -264,15 +319,19 @@ function DeviceTable({ devices, busy, probeAvailable, onTrust, onBlock, onProbe,
           <tr key={d.mac}>
             <td>
               <div className="watch-name">{d.display_name}</div>
-              <div className="watch-sub">{d.mac}{d.hostname ? ` · ${d.hostname}` : ''}{d.owner ? ` · ${d.owner}` : ''}</div>
+              <div className="watch-sub">{d.mac}{d.hostname ? ` · ${d.hostname}` : ''}{d.owner ? ` · ${d.owner}` : ''}{d.segment ? ` · ${d.segment}` : ''}</div>
+              {(d.lan_hostname || d.lan_last_seen) && (
+                <div className="watch-sub">wire: {d.lan_hostname || d.lan_ip}{d.lan_last_seen ? ` · ${ago(d.lan_last_seen)}` : ''}{d.lan_source ? ` via ${d.lan_source}` : ''}</div>
+              )}
               {d.probe && <div className="watch-sub">{d.probe.verdict}</div>}
             </td>
-            <td>{d.last_ip || '-'}</td>
-            <td>{d.manufacturer || <span className="text-dim">unknown</span>}</td>
+            <td>{d.last_ip || d.lan_ip || '-'}</td>
+            <td>{d.vendor || d.manufacturer || <span className="text-dim">unknown</span>}{!d.manufacturer && d.vendor ? <span className="watch-sub"> (OUI)</span> : null}</td>
             <td title={d.first_seen}>{ago(d.first_seen)}</td>
             <td title={d.last_seen}>{ago(d.last_seen)}</td>
             <td>
-              <span className={d.online ? 'status-green' : 'text-dim'}>{d.online ? 'online' : 'offline'}</span>
+              <span className={d.online ? 'status-green' : 'text-dim'}>{d.online ? 'eero: online' : d.first_source === 'lan' && !d.last_seen ? 'eero: never' : 'eero: offline'}</span>
+              {d.lan_online && <>{' · '}<span className="status-green">wire: online</span></>}
               {' · '}
               <span className={d.trusted ? 'status-green' : 'status-red'}>{d.trusted ? 'trusted' : 'untrusted'}</span>
             </td>
@@ -301,7 +360,7 @@ function LabelDialog({ device, onClose, onSave }: { device: WatchDevice; onClose
     <div className="watch-dialog-backdrop" onClick={onClose}>
       <div className="watch-dialog card" onClick={(e) => e.stopPropagation()}>
         <h3>{device.display_name || device.mac}</h3>
-        <div className="watch-sub">{device.mac} · {device.manufacturer || 'unknown vendor'} · {device.last_ip}</div>
+        <div className="watch-sub">{device.mac} · {device.vendor || device.manufacturer || 'unknown vendor'} · {device.last_ip || device.lan_ip}</div>
         <label>Name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Living room Apple TV" /></label>
         <label>Owner<input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="house" /></label>
         <label>Notes<input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="ok: backup NAS uploads overnight" /></label>
