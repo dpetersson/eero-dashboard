@@ -3,6 +3,7 @@ import type { AppTab } from '../features/app/types';
 
 const TAB_TO_PATH: Record<AppTab, string> = {
   devices: '/devices',
+  watch: '/watch',
   activity: '/health',
   profiles: '/profiles',
   'settings-general': '/settings/general',

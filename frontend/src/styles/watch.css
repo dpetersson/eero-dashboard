@@ -1,0 +1,72 @@
+/* Watch tab */
+.watch-view { display: flex; flex-direction: column; gap: 20px; }
+
+.watch-stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;
+}
+.watch-stat { padding: 14px 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+.watch-stat-value { font-size: 1.6rem; font-weight: 700; line-height: 1.1; }
+.watch-stat-label { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
+.watch-stat-sub { font-size: 0.72rem; color: var(--text-dim); margin-top: 2px; }
+.watch-stat-red .watch-stat-value { color: var(--red); }
+.watch-stat-green .watch-stat-value { color: var(--green); }
+.watch-stat-yellow .watch-stat-value { color: var(--yellow); }
+.watch-stat-muted .watch-stat-value { color: var(--text-muted); }
+
+.watch-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+}
+.watch-config { font-size: 0.78rem; color: var(--text-dim); }
+.watch-toolbar-actions { display: flex; gap: 8px; }
+.watch-toolbar-actions .btn-action { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; width: auto; }
+
+.watch-section .card { padding: 0; overflow-x: auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+.watch-section .card.empty-state { padding: 28px 20px; color: var(--text-muted); }
+
+.watch-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.watch-table th {
+  text-align: left; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-dim); padding: 10px 14px; border-bottom: 1px solid var(--border);
+}
+.watch-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.watch-table tr:last-child td { border-bottom: none; }
+.watch-row-warn td { background: rgba(var(--red-rgb), 0.06); }
+.watch-name { font-weight: 600; }
+.watch-sub { font-size: 0.74rem; color: var(--text-dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.watch-actions { white-space: nowrap; text-align: right; }
+.watch-actions button { margin-left: 4px; }
+.watch-hint { font-size: 0.76rem; color: var(--text-dim); padding: 10px 14px; margin: 0; }
+.watch-hint code { font-size: 0.74rem; }
+
+.watch-events { list-style: none; margin: 0; padding: 0; }
+.watch-event {
+  display: grid; grid-template-columns: 120px 1fr auto; gap: 12px; align-items: baseline;
+  padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 0.82rem;
+}
+.watch-event:last-child { border-bottom: none; }
+.watch-event-type { font-weight: 600; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.watch-event-new_device .watch-event-type, .watch-event-steady_upload .watch-event-type { color: var(--red); }
+.watch-event-trusted .watch-event-type, .watch-event-baseline .watch-event-type { color: var(--green); }
+.watch-event-returned .watch-event-type { color: var(--yellow); }
+.watch-event-detail { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; word-break: break-word; }
+.watch-event-at { color: var(--text-dim); font-size: 0.74rem; white-space: nowrap; }
+
+.watch-dialog-backdrop {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+.watch-dialog {
+  width: min(560px, 92vw); max-height: 85vh; overflow: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+.watch-dialog h3 { margin: 0; }
+.watch-dialog label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--text-muted); }
+.watch-dialog input[type="text"], .watch-dialog input:not([type]) {
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text); font-size: 0.9rem;
+}
+.watch-dialog .watch-check { flex-direction: row; align-items: center; gap: 8px; }
+.watch-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+
+@media (max-width: 768px) {
+  .watch-event { grid-template-columns: 1fr; gap: 2px; }
+  .watch-table th:nth-child(4), .watch-table td:nth-child(4) { display: none; }
+}

@@ -1,4 +1,4 @@
-import { Smartphone, HeartPulse, User, Settings, ArrowDown, ArrowUp } from 'lucide-react';
+import { Smartphone, HeartPulse, User, Settings, ArrowDown, ArrowUp, ShieldAlert } from 'lucide-react';
 import * as api from '../../api';
 import type { AppTab } from './types';
 
@@ -52,6 +52,9 @@ export default function AppSidebar({
       <nav className="sidebar-nav">
         <button className={`sidebar-item ${tab === 'devices' ? 'active' : ''}`} onClick={() => handleTab('devices')}>
           <span className="sidebar-icon"><Smartphone size={18} /></span> Devices
+        </button>
+        <button className={`sidebar-item ${tab === 'watch' ? 'active' : ''}`} onClick={() => handleTab('watch')}>
+          <span className="sidebar-icon"><ShieldAlert size={18} /></span> Watch
         </button>
         <button className={`sidebar-item ${tab === 'activity' ? 'active' : ''}`} onClick={() => handleTab('activity')}>
           <span className="sidebar-icon"><HeartPulse size={18} /></span> Health

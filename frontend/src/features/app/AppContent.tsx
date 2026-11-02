@@ -1,6 +1,7 @@
 import type { AppTab, SignalFilter, BandClickFilter } from './types';
 import DeviceList from '../../components/DeviceList';
 import ActivityView from '../../components/ActivityView';
+import WatchView from '../../components/WatchView';
 import ProfileManager from '../../components/ProfileManager';
 import GuestNetwork from '../../components/GuestNetwork';
 import { GeneralSettings, PortForwardsSettings, DhcpReservationsSettings, BlacklistSettings } from '../../components/SettingsView';
@@ -35,6 +36,7 @@ export default function AppContent({ selectedNetwork, tab, setTab, signalFilter,
           />
         </ErrorBoundary>
       )}
+      {tab === 'watch' && <ErrorBoundary name="Watch"><WatchView networkId={selectedNetwork} /></ErrorBoundary>}
       {tab === 'activity' && <ErrorBoundary name="Health"><ActivityView networkId={selectedNetwork} onSignalClick={onSignalClick} onBandClick={onBandClick} /></ErrorBoundary>}
       {tab === 'profiles' && <ErrorBoundary name="Profiles"><ProfileManager networkId={selectedNetwork} /></ErrorBoundary>}
       {tab === 'settings-general' && <ErrorBoundary name="General Settings"><GeneralSettings networkId={selectedNetwork} /></ErrorBoundary>}

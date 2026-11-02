@@ -34,6 +34,8 @@ _Built for operators who want fast, efficient network control._
 |----------|
 | ![Settings](docs/screenshots/settings.png) |
 
+> **This fork** adds a *Watch* tab for home-network security: a device inventory baseline, new-device alerts, a steady-upload rule that catches streaming cameras, an optional nmap probe, and a LAN-only guard. See [docs/watch.md](./docs/watch.md). Upstream: [xrvk/eero-dashboard](https://github.com/xrvk/eero-dashboard).
+
 > **Note:** Uses the unofficial [`eero-api`](https://github.com/fulviofreitas/eero-api) library. All API calls go through eero's cloud — there is no local API. Amazon-linked eero accounts are not supported.
 
 ---
@@ -43,6 +45,7 @@ _Built for operators who want fast, efficient network control._
 | 📊 Monitor | 🎛️ Control | 🎨 Experience |
 |-----------|-----------|--------------|
 | Network health & speed tests | Block/unblock devices | Dark & light themes |
+| **Watch:** device baseline, new-device alerts, steady-upload rule, nmap probe | Trust / label / block from the alert | LAN-only guard |
 | Device listing with usage stats | Pause/unpause profiles | Real-time filtering |
 | eero node status & mesh quality | Reboot nodes, manage DNS | Instant tab switching |
 
@@ -68,6 +71,7 @@ Open **http://localhost:8420** 🎉
 | [⚙️ Configuration](./docs/configuration.md) | Environment variables & cache behavior |
 | [🏗️ Architecture](./docs/architecture/index.md) | System design, backend, frontend & data flow |
 | [📡 API Reference](./docs/api-reference.md) | REST endpoint catalog |
+| [🛡️ Watch](./docs/watch.md) | Inventory baseline, new-device alerts, upload rule, LAN-only guard |
 | [🤝 Contributing](./CONTRIBUTING.md) | Dev workflow, testing & validation |
 
 ---

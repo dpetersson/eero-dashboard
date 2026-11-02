@@ -1,5 +1,6 @@
 export type AppTab =
   | 'devices'
+  | 'watch'
   | 'activity'
   | 'profiles'
   | 'settings-general'

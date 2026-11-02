@@ -6,7 +6,12 @@ services:
       - "8420:8420"
     volumes:
       - eero-data:/app/backend/data
+    # For the LAN-only guard and the nmap probe to see real LAN addresses,
+    # run with host networking (uncomment, and drop the ports: block).
+    # network_mode: host
     environment:
+      # - WATCH_ALLOWED_CIDRS=192.168.7.0/24
+      # - WATCH_WEBHOOK=https://ntfy.sh/your-private-topic
       - SPEED_HISTORY_DAYS=365
     restart: unless-stopped
 

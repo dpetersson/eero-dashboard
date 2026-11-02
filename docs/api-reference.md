@@ -22,6 +22,7 @@ Base path: `/api`
 - [Network Reboot](#network-reboot)
 - [Thread & Routing](#thread-routing)
 - [Blacklist](#blacklist)
+- [Watch](#watch)
 
 ## Health
 
@@ -152,3 +153,17 @@ For endpoint source-of-truth, see:
 
 - `backend/main.py`
 - `backend/features/**/router.py`
+
+## Watch
+
+Local inventory, never proxied to eero. See [watch.md](./watch.md).
+
+- `GET /networks/{network_id}/watch/summary`
+- `GET /networks/{network_id}/watch/devices`
+- `GET /networks/{network_id}/watch/devices/{mac}`
+- `PATCH /networks/{network_id}/watch/devices/{mac}`
+- `DELETE /networks/{network_id}/watch/devices/{mac}`
+- `POST /networks/{network_id}/watch/devices/{mac}/probe`
+- `GET /networks/{network_id}/watch/events`
+- `POST /networks/{network_id}/watch/poll`
+- `POST /networks/{network_id}/watch/baseline`

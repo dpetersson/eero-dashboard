@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -5,11 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from core.client import is_authenticated, lifespan
+from core.client import is_authenticated, lifespan as client_lifespan
 from core.demo import is_demo_mode
 from core.demo_middleware import DemoModeMiddleware
 from core.dry_run import is_dry_run
 from core.errors import api_error_response
+from core.lan_guard import LanOnlyMiddleware
 from features.auth.router import router as auth_router
 from features.devices.router import router as devices_router
 from features.eero_nodes.router import router as eero_nodes_router
@@ -20,8 +22,21 @@ from features.port_forwards.router import router as port_forwards_router
 from features.profiles.router import router as profiles_router
 from features.security.router import router as security_router
 from features.speed_test.router import router as speed_test_router
+from features.watch import poller as watch_poller
+from features.watch.router import router as watch_router
 
 DATA_DIR = Path(__file__).parent / "data"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with client_lifespan(app):
+        watch_poller.start()
+        try:
+            yield
+        finally:
+            await watch_poller.stop()
+
 
 app = FastAPI(title="eero Dashboard API", version="1.0.0", lifespan=lifespan)
 
@@ -33,6 +48,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(DemoModeMiddleware)
+app.add_middleware(LanOnlyMiddleware)  # added last = outermost: runs before everything else
 app.include_router(auth_router)
 app.include_router(devices_router)
 app.include_router(eero_nodes_router)
@@ -43,6 +59,7 @@ app.include_router(port_forwards_router)
 app.include_router(profiles_router)
 app.include_router(security_router)
 app.include_router(speed_test_router)
+app.include_router(watch_router)
 
 
 @app.exception_handler(HTTPException)

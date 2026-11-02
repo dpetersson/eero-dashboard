@@ -140,6 +140,7 @@ function AppMain() {
             </button>
             <h1>{
               tab === 'devices' ? 'Devices' :
+              tab === 'watch' ? 'Watch' :
               tab === 'activity' ? 'Network Health' :
               tab === 'profiles' ? 'Profiles' :
               tab === 'settings-general' ? 'General' :

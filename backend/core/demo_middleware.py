@@ -57,7 +57,9 @@ class DemoModeMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
-        if not path.startswith("/api/") or path in _PASSTHROUGH_PATHS:
+        if not path.startswith("/api/") or path in _PASSTHROUGH_PATHS or "/watch/" in path:
+            # /watch/* is served from the local SQLite inventory, never from eero,
+            # so it keeps working (and mutating) in demo mode.
             return await call_next(request)
 
         method = request.method.upper()

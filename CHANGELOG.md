@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Watch** tab (`features/watch`): SQLite device inventory with a trusted baseline, new-device and returned-device events, a 24h steady-upload rule, webhook alerts (Slack or ntfy), an optional nmap camera-port probe, and trust/label/block/forget actions. See `docs/watch.md`.
+- `core/lan_guard.py`: rejects `/api/*` requests from non-private source addresses (`WATCH_LAN_ONLY`, `WATCH_ALLOWED_CIDRS`).
+- Demo mode exercises the Watch tab against the synthetic device list; `/watch/*` mutations bypass the demo no-op short-circuit.
+
 ## [1.0.0] - 2026-05-23
 
 First tagged release. Promotes the project from the unstable `0.y.z` line — the REST surface (`/api/*`) and container env vars are now committed to SemVer compatibility going forward.

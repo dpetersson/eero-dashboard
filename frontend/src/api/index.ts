@@ -6,3 +6,4 @@ export * from './profiles';
 export * from './settings';
 export * from './devices';
 export * from './prefetch';
+export * from './watch';
