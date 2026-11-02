@@ -88,3 +88,4 @@
   padding: 6px 8px; color: var(--text); font-size: 0.82rem;
 }
 .section-header .btn-action { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; width: auto; }
+.watch-inline-check { flex-direction: row; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--text-muted); }

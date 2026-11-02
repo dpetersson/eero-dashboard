@@ -106,6 +106,7 @@ export interface WatchSummary {
     allowed_cidrs: string[];
     lan_scan_enabled: boolean;
     lan_scan_seconds: number;
+    tuya_file: boolean;
   };
 }
 
@@ -142,6 +143,53 @@ export interface IdentifyStatus {
   targets: IdentifyTarget[];
   dark_count: number;
 }
+
+export interface TuyaDeviceInfo {
+  id: string;
+  name: string;
+  mac: string | null;
+  ip: string;
+  version: string;
+  product_name: string;
+  category: string;
+  has_key: boolean;
+}
+
+export interface TuyaMatch {
+  tuya: TuyaDeviceInfo;
+  mac: string;
+  ip: string;
+  matched_by: 'mac' | 'ip' | '';
+  current_name: string;
+  current_nickname: string;
+  trusted: boolean;
+  will_rename: boolean;
+}
+
+export interface TuyaPreview {
+  file: boolean;
+  dir: string;
+  count: number;
+  with_mac: number;
+  with_ip: number;
+  with_key: number;
+  matches: TuyaMatch[];
+  unmatched: TuyaDeviceInfo[];
+}
+
+export interface TuyaImportResult {
+  renamed: { mac: string; name: string; matched_by: string }[];
+  skipped: string[];
+  unmatched: string[];
+  eero_nicknames_set: number;
+  eero_failed: { mac: string; error: string }[];
+}
+
+export const getTuyaPreview = (networkId: string) =>
+  request<TuyaPreview>(`/networks/${networkId}/watch/tuya/preview`);
+
+export const runTuyaImport = (networkId: string, body: { only_unnamed: boolean; eero_nickname: boolean; trust: boolean }) =>
+  request<TuyaImportResult>(`/networks/${networkId}/watch/tuya/import`, { method: 'POST', body: JSON.stringify(body) });
 
 export const getIdentifyStatus = (networkId: string) =>
   request<IdentifyStatus>(`/networks/${networkId}/watch/identify`);

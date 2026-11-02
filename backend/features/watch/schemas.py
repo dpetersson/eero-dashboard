@@ -9,6 +9,12 @@ class LabelRequest(BaseModel):
     eero_nickname: bool = False   # also write `name` to eero as the device nickname
 
 
+class TuyaImportRequest(BaseModel):
+    only_unnamed: bool = True     # leave devices you already named alone
+    eero_nickname: bool = True    # write the Tuya name to eero as the nickname
+    trust: bool = True
+
+
 class IdentifyStartRequest(BaseModel):
     macs: list[str] | None = None   # None = every unnamed online device with an address
 

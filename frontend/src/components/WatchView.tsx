@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ShieldAlert, ShieldCheck, RefreshCw, Radar, Ban, Pencil, Trash2, Network, Crosshair, Square } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, RefreshCw, Radar, Ban, Pencil, Trash2, Network, Crosshair, Square, FileInput } from 'lucide-react';
 
 import * as api from '../api';
 import { useFetch } from '../hooks/useFetch';
-import type { IdentifyStatus, WatchDevice, WatchEvent, WatchSummary } from '../api/watch';
+import type { IdentifyStatus, TuyaImportResult, TuyaPreview, WatchDevice, WatchEvent, WatchSummary } from '../api/watch';
 
 interface WatchViewProps {
   networkId: string;
@@ -20,6 +20,7 @@ const EVENT_LABEL: Record<string, string> = {
   probe: 'Probe',
   nickname: 'eero nickname',
   new_device_lan: 'On wire, not in eero',
+  tuya_import: 'Tuya import',
 };
 
 function ago(iso: string): string {
@@ -47,6 +48,9 @@ export default function WatchView({ networkId }: WatchViewProps) {
   const [probeResult, setProbeResult] = useState<{ mac: string; result: api.WatchProbe } | null>(null);
   const [identify, setIdentify] = useState<IdentifyStatus | null>(null);
   const [identifyNames, setIdentifyNames] = useState<Record<string, string>>({});
+  const [tuya, setTuya] = useState<TuyaPreview | null>(null);
+  const [tuyaResult, setTuyaResult] = useState<TuyaImportResult | null>(null);
+  const [tuyaOnlyUnnamed, setTuyaOnlyUnnamed] = useState(true);
 
   const run = useCallback(async (key: string, fn: () => Promise<unknown>) => {
     setBusy(key);
@@ -100,6 +104,18 @@ export default function WatchView({ networkId }: WatchViewProps) {
   useEffect(() => {
     api.getIdentifyStatus(networkId).then(setIdentify).catch(() => {});
   }, [networkId]);
+  const tuyaFile = !!data?.config.tuya_file;
+  useEffect(() => {
+    if (!tuyaFile) return;
+    let cancelled = false;
+    api.getTuyaPreview(networkId).then((p) => { if (!cancelled) setTuya(p); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [networkId, tuyaFile]);
+  const importTuya = () => run('tuya', async () => {
+    const res = await api.runTuyaImport(networkId, { only_unnamed: tuyaOnlyUnnamed, eero_nickname: true, trust: true });
+    setTuyaResult(res);
+    setTuya(await api.getTuyaPreview(networkId));
+  });
   const startIdentify = () => run('identify', async () => setIdentify(await api.startIdentify(networkId)));
   const stopIdentify = () => run('identify', async () => setIdentify(await api.stopIdentify(networkId)));
   const nameIdentified = (mac: string) => run(`identify:${mac}`, async () => {
@@ -150,6 +166,60 @@ export default function WatchView({ networkId }: WatchViewProps) {
       </div>
 
       {actionError && <div className="card error-card">{actionError}</div>}
+
+      {tuyaFile && tuya && tuya.file && (
+        <div className="watch-section">
+          <div className="section-header">
+            <h2><FileInput size={16} />Tuya names from devices.json <span className={`badge ${tuya.matches.length ? '' : 'muted'}`}>{tuya.matches.length}</span></h2>
+            <div className="watch-toolbar-actions">
+              <label className="watch-check watch-inline-check">
+                <input type="checkbox" checked={tuyaOnlyUnnamed} onChange={(e) => setTuyaOnlyUnnamed(e.target.checked)} /> Only unnamed
+              </label>
+              <button className="btn-primary btn-sm" onClick={importTuya}
+                disabled={busy === 'tuya' || !tuya.matches.some((m) => !tuyaOnlyUnnamed || !m.current_name)}>
+                Import {tuya.matches.filter((m) => !tuyaOnlyUnnamed || !m.current_name).length} names
+              </button>
+            </div>
+          </div>
+          <div className="card">
+            <p className="watch-hint">
+              {tuya.count} devices in {tuya.dir}: {tuya.with_mac} with a MAC, {tuya.with_ip} with a LAN IP, {tuya.with_key} with a local key.
+              {' '}{tuya.matches.length} match the inventory ({tuya.matches.filter((m) => m.matched_by === 'mac').length} by MAC,
+              {' '}{tuya.matches.filter((m) => m.matched_by === 'ip').length} by IP), {tuya.unmatched.length} do not.
+              Importing names and trusts each match and writes the name to eero as the nickname. Local keys stay in the file.
+            </p>
+            {tuyaResult && (
+              <p className="watch-hint">
+                Last import: {tuyaResult.renamed.length} named, {tuyaResult.skipped.length} skipped, {tuyaResult.unmatched.length} unmatched,
+                {' '}{tuyaResult.eero_nicknames_set} eero nicknames set{tuyaResult.eero_failed.length ? `, ${tuyaResult.eero_failed.length} eero writes failed (${tuyaResult.eero_failed[0].error})` : ''}.
+              </p>
+            )}
+            <table className="watch-table">
+              <thead><tr><th>Tuya name</th><th>Product</th><th>Matched</th><th>IP</th><th>Current name</th></tr></thead>
+              <tbody>
+                {tuya.matches.map((m) => (
+                  <tr key={m.mac} className={tuyaOnlyUnnamed && m.current_name ? 'identify-row-silent' : ''}>
+                    <td><div className="watch-name">{m.tuya.name || <span className="text-dim">(no name in file)</span>}</div><div className="watch-sub">{m.mac}</div></td>
+                    <td>{m.tuya.product_name || '-'}{m.tuya.category ? <span className="watch-sub"> [{m.tuya.category}]</span> : null}</td>
+                    <td>by {m.matched_by}</td>
+                    <td>{m.ip}</td>
+                    <td>{m.current_name || <span className="text-dim">unnamed</span>}{m.current_nickname && m.current_nickname !== m.current_name ? <div className="watch-sub">eero: {m.current_nickname}</div> : null}</td>
+                  </tr>
+                ))}
+                {tuya.unmatched.map((t) => (
+                  <tr key={t.id} className="identify-row-silent">
+                    <td><div className="watch-name">{t.name || t.id}</div><div className="watch-sub">{t.mac || 'no MAC in file'}</div></td>
+                    <td>{t.product_name || '-'}</td>
+                    <td className="status-red">no match</td>
+                    <td>{t.ip || '-'}</td>
+                    <td className="text-dim">not in inventory (offline, or MAC/IP missing from the file)</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="watch-section">
         <div className="section-header">
@@ -207,6 +277,7 @@ export default function WatchView({ networkId }: WatchViewProps) {
           <div className="card empty-state">
             Start identify mode to work out which physical device each unnamed row is. Named devices are trusted and the name is written
             to eero as the device nickname, so the eero app shows it too.
+            {!data.config.tuya_file && <> For Tuya / Smart Life / Feit devices, drop tinytuya's devices.json into the backend's data/tuya folder and a one-click name import appears here.</>}
           </div>
         )}
       </div>

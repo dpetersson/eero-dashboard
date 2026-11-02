@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from . import identify, lanscan, poller, schemas, service, store
+from . import identify, lanscan, poller, schemas, service, store, tuya_import
 
 router = APIRouter(prefix="/api", tags=["watch"])
 
@@ -130,6 +130,22 @@ async def oui_update():
     except Exception as e:
         raise HTTPException(status_code=502, detail="OUI download failed: %s" % e)
     return {"bytes": size}
+
+
+# --------------------------------------------------------------------------- Tuya name import
+
+@router.get("/networks/{network_id}/watch/tuya/preview")
+async def tuya_preview(network_id: str):
+    return tuya_import.preview(network_id)
+
+
+@router.post("/networks/{network_id}/watch/tuya/import")
+async def tuya_apply(network_id: str, req: schemas.TuyaImportRequest | None = None):
+    if not tuya_import.available():
+        raise HTTPException(status_code=404, detail="No devices.json in %s" % tuya_import.TUYA_DIR)
+    req = req or schemas.TuyaImportRequest()
+    return await tuya_import.apply(network_id, only_unnamed=req.only_unnamed,
+                                   eero_nickname=req.eero_nickname, trust=req.trust)
 
 
 # --------------------------------------------------------------------------- identify mode

@@ -473,6 +473,7 @@ def summary(network_id: str) -> dict[str, Any]:
             "probe_available": probe.available(),
             "lan_only": config.lan_only(),
             "allowed_cidrs": config.allowed_cidrs(),
+            "tuya_file": __import__("features.watch.tuya_import", fromlist=["available"]).available(),
             "lan_scan_enabled": config.lan_scan(),
             "lan_scan_seconds": config.lan_scan_seconds(),
         },

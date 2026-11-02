@@ -91,6 +91,8 @@ DEVICE_COLUMNS_V2 = [
     ("ssid", "TEXT NOT NULL DEFAULT ''"),
     ("segment", "TEXT NOT NULL DEFAULT ''"),
     ("first_source", "TEXT NOT NULL DEFAULT 'eero'"),
+    ("tuya_id", "TEXT NOT NULL DEFAULT ''"),
+    ("tuya_product", "TEXT NOT NULL DEFAULT ''"),
 ]
 
 
@@ -304,6 +306,13 @@ def label_device(mac: str, *, name: str | None = None, owner: str | None = None,
             db.execute("UPDATE devices SET %s WHERE mac = ?" % ", ".join(sets), vals)
             db.commit()
     return get_device(mac)
+
+
+def set_tuya(mac: str, tuya_id: str, product: str) -> None:
+    with _lock:
+        db = _db()
+        db.execute("UPDATE devices SET tuya_id = ?, tuya_product = ? WHERE mac = ?", (tuya_id, product, mac))
+        db.commit()
 
 
 def set_nickname(mac: str, nickname: str) -> None:

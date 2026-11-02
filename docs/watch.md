@@ -98,6 +98,26 @@ Suggested convention: room, fixture, kind. "Kitchen – Island dimmer",
 "Garage – Exterior lights switch". Owner for who it belongs to, notes for
 brand and model.
 
+## Tuya name import (Feit, Smart Life, Tuya Smart)
+
+Tuya-platform devices carry their user-given names only in Tuya's cloud.
+`python -m tinytuya wizard` (needs a free Tuya IoT developer account, see
+the write-up in the Security folder) produces `devices.json` with name,
+device id, local key and, in current versions, MAC; its optional poll adds
+`snapshot.json` with each device's LAN IP. Copy both into `data/tuya/` in
+the data volume. The Watch tab then shows a *Tuya names from devices.json*
+card with a preview: each file entry matched to an inventory row by MAC,
+falling back to IP, plus the ones that did not match. *Import* names and
+trusts every match, tags the notes with the Tuya product name, records the
+Tuya device id, and writes the name to eero as the nickname. *Only unnamed*
+(default on) leaves devices you already named alone.
+
+Local keys are never returned by the API or stored in the inventory; they
+stay in the file for local control.
+
+Endpoints: `GET /watch/tuya/preview`, `POST /watch/tuya/import` with
+`{only_unnamed, eero_nickname, trust}`.
+
 ## Identify mode
 
 Cloud-only smart switches and plugs expose nothing locally, so the only way
