@@ -101,6 +101,16 @@ def _is_connected(device: dict) -> bool:
     return True if c is None else bool(c)
 
 
+def _eero_ts(value: Any) -> str | None:
+    """eero's last_active/first_active ('2026-11-02T14:49:52.301Z') in our second-resolution ISO form."""
+    if not value:
+        return None
+    try:
+        return store.parse_iso(str(value).replace("Z", "+00:00")).replace(microsecond=0).isoformat()
+    except ValueError:
+        return None
+
+
 def nodes_as_devices(nodes: list[dict]) -> list[dict]:
     """eero lists its own hardware under /eeros, not /devices. Fold the nodes in so a
     LAN sweep does not report the gateway as an unknown device."""
@@ -159,6 +169,20 @@ def send_webhook(title: str, body: str) -> None:
 
 # --------------------------------------------------------------------------- core
 
+def baseline_at(network_id: str) -> str | None:
+    """When the baseline was taken. Inventories created before the meta key existed
+    fall back to the baseline event, and the key is written so later reads are cheap."""
+    value = store.get_meta("baseline_at:%s" % network_id)
+    if value:
+        return value
+    events = [e for e in store.list_events(network_id, limit=1000) if e["type"] == "baseline"]
+    if not events:
+        return None
+    value = events[-1]["at"]
+    store.set_meta("baseline_at:%s" % network_id, value)
+    return value
+
+
 def poll(network_id: str, devices: list[dict], *, first_run_trusts: bool = True) -> dict[str, Any]:
     """Diff the device list against the inventory. Returns a summary of what changed.
 
@@ -177,12 +201,28 @@ def poll(network_id: str, devices: list[dict], *, first_run_trusts: bool = True)
         mac = norm_mac(dev.get("mac"))
         if not mac:
             continue
-        if not _is_connected(dev):
-            continue
+        connected = _is_connected(dev)
         fields = _fields(dev)
         fields["trusted"] = 1 if (first_run and first_run_trusts) else 0
         prev = known.get(mac)
-        created = store.upsert_device(mac, network_id, seen_at, fields)
+        # Disconnected devices are still part of what eero knows: record them with eero's own
+        # last-active time so a sleeping Mac seen on the wire is never "unknown to eero".
+        stamp = seen_at if connected else (_eero_ts(dev.get("last_active")) or "")
+        if not connected and not stamp and prev is None:
+            continue  # nothing usable to record
+        first = _eero_ts(dev.get("first_active"))
+        created = store.upsert_device(mac, network_id, stamp or seen_at, fields, first_seen=first)
+        if not connected:
+            if created and not first_run:
+                base = baseline_at(network_id)
+                if base and stamp <= base:
+                    # eero knew it before we started watching: household history, not a newcomer.
+                    store.label_device(mac, trusted=True)
+                else:
+                    new.append(mac)
+            elif first_run and first_run_trusts and prev is not None and not prev.get("trusted"):
+                store.label_device(mac, trusted=True)
+            continue
         up, down = _usage(dev)
         sightings.append((mac, seen_at, fields["ip"], up, down))
 
@@ -387,10 +427,7 @@ def summary(network_id: str) -> dict[str, Any]:
     new_cutoff = now - timedelta(days=config.new_days())
     online_cutoff = now - timedelta(seconds=config.poll_seconds() * 2 + 60)
     stats = store.upload_stats(network_id, hours=24)
-    baseline_at = store.get_meta("baseline_at:%s" % network_id)
-    if not baseline_at:  # inventories created before this key existed: use the baseline event
-        ev = [e for e in store.list_events(network_id, limit=1000) if e["type"] == "baseline"]
-        baseline_at = ev[-1]["at"] if ev else None
+    base = baseline_at(network_id)
 
     for d in devices:
         d["display_name"] = display_name(d)
@@ -399,7 +436,7 @@ def summary(network_id: str) -> dict[str, Any]:
             first = store.parse_iso(d["first_seen"])
             # "New" means joined after the baseline, not "baseline was taken recently".
             d["is_new"] = (d.get("device_type") != "eero_node" and first >= new_cutoff
-                           and (not baseline_at or first > store.parse_iso(baseline_at)))
+                           and (not base or first > store.parse_iso(base)))
             d["online"] = bool(d.get("last_seen")) and store.parse_iso(d["last_seen"]) >= online_cutoff
         except ValueError:
             d["is_new"] = d["online"] = False
@@ -446,9 +483,10 @@ async def probe_device(mac: str) -> dict[str, Any]:
     rec = store.get_device(mac)
     if rec is None:
         return {"ok": False, "error": "unknown device"}
-    if not rec.get("last_ip"):
+    ip = rec.get("last_ip") or rec.get("lan_ip")
+    if not ip:
         return {"ok": False, "error": "device has no recorded IP"}
-    result = await probe.probe(rec["last_ip"])
+    result = await probe.probe(ip)
     if result.get("ok"):
         store.set_probe(mac, result)
     return result

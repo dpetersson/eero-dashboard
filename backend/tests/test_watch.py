@@ -57,11 +57,51 @@ class PollTests(WatchStoreBase):
         types = [e["type"] for e in store.list_events("net1")]
         self.assertIn("new_device", types)
 
-    def test_disconnected_devices_are_ignored(self):
+    def test_disconnected_devices_are_recorded_with_eero_timestamp_but_not_sampled(self):
+        service.poll("net1", [_dev("aa:bb:cc:dd:ee:01")])
+        # Known to eero since before the baseline: household history, trusted, no alert.
+        result = service.poll("net1", [_dev("aa:bb:cc:dd:ee:01"),
+                                       _dev("aa:bb:cc:dd:ee:09", connected=False, last_active="2026-10-30T10:00:00.301Z",
+                                            first_active="2026-09-01T08:00:00Z",
+                                            hostname="mac", inferred_make="Apple", inferred_model="Mac")])
+        self.assertEqual(result["new"], [])
+        self.assertEqual(result["online"], 1)
+        rec = store.get_device("aa:bb:cc:dd:ee:09")
+        self.assertTrue(rec["trusted"])
+        self.assertEqual(rec["last_seen"], "2026-10-30T10:00:00+00:00")
+        self.assertEqual(rec["first_seen"], "2026-09-01T08:00:00+00:00")
+        self.assertEqual(rec["make_model"], "Apple Mac")
+        self.assertEqual(store.samples("aa:bb:cc:dd:ee:09"), [])
+        s = service.summary("net1")
+        self.assertEqual(s["counts"]["new"], 0)
+        self.assertEqual(s["counts"]["untrusted"], 0)
+        # First active after the baseline: a newcomer that already went to sleep. Still alerted.
+        future = (datetime.now(timezone.utc) + timedelta(seconds=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        result = service.poll("net1", [_dev("aa:bb:cc:dd:ee:01"),
+                                       _dev("aa:bb:cc:dd:ee:10", connected=False, last_active=future, first_active=future)])
+        self.assertEqual(result["new"], ["aa:bb:cc:dd:ee:10"])
+        self.assertFalse(store.get_device("aa:bb:cc:dd:ee:10")["trusted"])
+
+    def test_disconnected_device_without_timestamp_is_skipped(self):
         service.poll("net1", [_dev("aa:bb:cc:dd:ee:01")])
         result = service.poll("net1", [_dev("aa:bb:cc:dd:ee:01"), _dev("aa:bb:cc:dd:ee:09", connected=False)])
         self.assertEqual(result["new"], [])
         self.assertIsNone(store.get_device("aa:bb:cc:dd:ee:09"))
+
+    def test_lan_first_device_gets_eero_metadata_when_eero_lists_it_disconnected(self):
+        service.poll("net1", [_dev("aa:bb:cc:dd:ee:01")])
+        service.ingest_lan_scan("net1", {"source": "x", "network": {"cidr": "192.168.7.0/24"},
+                                         "devices": [{"mac": "b2:9b:3a:c0:fc:77", "ip": "192.168.7.190"}]})
+        service.poll("net1", [_dev("aa:bb:cc:dd:ee:01"),
+                              _dev("b2:9b:3a:c0:fc:77", connected=False, last_active="2026-11-02T14:49:52Z",
+                                   hostname="mac", inferred_make="Apple", inferred_model="Mac", ssid="Home")])
+        rec = store.get_device("b2:9b:3a:c0:fc:77")
+        self.assertEqual(rec["hostname"], "mac")
+        self.assertEqual(rec["make_model"], "Apple Mac")
+        self.assertEqual(rec["ssid"], "Home")
+        self.assertEqual(rec["last_seen"], "2026-11-02T14:49:52+00:00")
+        self.assertEqual(rec["first_source"], "lan")
+        self.assertFalse(rec["trusted"])  # still the user's call
 
     def test_returned_after_absence(self):
         service.poll("net1", [_dev("aa:bb:cc:dd:ee:01")])
@@ -357,3 +397,28 @@ class NodeLanAliasTests(WatchStoreBase):
         self.assertEqual([d["mac"] for d in s["cross"]["lan_only"]], ["c4:4f:33:00:11:22"])
         self.assertEqual(s["counts"]["new"], 1)  # node interfaces are never "new"
         self.assertEqual([e["mac"] for e in store.list_events("net1") if e["type"] == "new_device_lan"], ["c4:4f:33:00:11:22"])
+
+
+class ProbeTargetTests(WatchStoreBase):
+    def test_probe_uses_wire_ip_for_lan_only_devices(self):
+        from unittest.mock import AsyncMock
+        from features.watch import probe as probe_mod
+        service.ingest_lan_scan("net1", {"source": "x", "network": {"cidr": "192.168.7.0/24"},
+                                         "devices": [{"mac": "b2:9b:3a:c0:fc:77", "ip": "192.168.7.190"}]})
+        import asyncio
+        with patch.object(probe_mod, "probe", AsyncMock(return_value={"ok": True, "ip": "192.168.7.190", "ports": [], "open_count": 0, "camera_like": [], "verdict": "none"})) as m:
+            asyncio.run(service.probe_device("b2:9b:3a:c0:fc:77"))
+            m.assert_awaited_once_with("192.168.7.190")
+
+
+class BaselineFallbackTests(WatchStoreBase):
+    def test_poll_uses_baseline_event_when_meta_key_is_missing(self):
+        service.poll("net1", [_dev("aa:bb:cc:dd:ee:01")])
+        with store._lock:  # simulate an inventory created before baseline_at existed
+            store._db().execute("DELETE FROM meta WHERE key = 'baseline_at:net1'")
+            store._db().commit()
+        result = service.poll("net1", [_dev("aa:bb:cc:dd:ee:01"),
+                                       _dev("aa:bb:cc:dd:ee:09", connected=False, last_active="2026-10-30T10:00:00Z")])
+        self.assertEqual(result["new"], [])
+        self.assertTrue(store.get_device("aa:bb:cc:dd:ee:09")["trusted"])
+        self.assertIsNotNone(store.get_meta("baseline_at:net1"))

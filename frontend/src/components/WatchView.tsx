@@ -176,8 +176,9 @@ export default function WatchView({ networkId }: WatchViewProps) {
                   onForget={forget}
                 />
                 <p className="watch-hint">
-                  These answered ARP during the sweep but eero has never reported them. Static-IP devices, a second router, or something on a
-                  switch behind a non-eero AP land here. So would a device eero cannot see.
+                  These answered ARP during the sweep while eero lists them as disconnected or not at all. A sleeping laptop or phone that
+                  still answers ARP is the usual cause ("eero: offline" with a name). "eero: never" means eero has no record: a static-IP
+                  device, a second router, something behind a non-eero AP, or a device eero cannot see.
                 </p>
               </div>
             )}

@@ -168,7 +168,8 @@ def list_devices(network_id: str) -> list[dict[str, Any]]:
     return [_device_row(r) for r in rows]
 
 
-def upsert_device(mac: str, network_id: str, seen_at: str, fields: dict[str, Any]) -> bool:
+def upsert_device(mac: str, network_id: str, seen_at: str, fields: dict[str, Any],
+                  first_seen: str | None = None) -> bool:
     """Insert or update the device row. Returns True when the row was created."""
     cols = {k: (v if v is not None else "") for k, v in fields.items()}
     with _lock:
@@ -180,7 +181,7 @@ def upsert_device(mac: str, network_id: str, seen_at: str, fields: dict[str, Any
                    manufacturer, device_type, connection, device_url, trusted, make_model, ssid, segment,
                    first_source, oui_vendor)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (mac, network_id, seen_at, seen_at, cols.get("ip", ""), cols.get("hostname", ""),
+                (mac, network_id, first_seen or seen_at, seen_at, cols.get("ip", ""), cols.get("hostname", ""),
                  cols.get("nickname", ""), cols.get("manufacturer", ""), cols.get("device_type", ""),
                  cols.get("connection", ""), cols.get("device_url", ""), int(cols.get("trusted", 0)),
                  cols.get("make_model", ""), cols.get("ssid", ""), cols.get("segment", ""),
@@ -189,7 +190,7 @@ def upsert_device(mac: str, network_id: str, seen_at: str, fields: dict[str, Any
             db.commit()
             return True
         db.execute(
-            """UPDATE devices SET last_seen = ?, last_ip = ?,
+            """UPDATE devices SET last_seen = MAX(last_seen, ?), last_ip = CASE WHEN ? != '' THEN ? ELSE last_ip END,
                hostname = CASE WHEN ? != '' THEN ? ELSE hostname END,
                nickname = CASE WHEN ? != '' THEN ? ELSE nickname END,
                manufacturer = CASE WHEN ? != '' THEN ? ELSE manufacturer END,
@@ -201,7 +202,7 @@ def upsert_device(mac: str, network_id: str, seen_at: str, fields: dict[str, Any
                segment = CASE WHEN ? != '' THEN ? ELSE segment END,
                oui_vendor = CASE WHEN oui_vendor = '' THEN ? ELSE oui_vendor END
                WHERE mac = ?""",
-            (seen_at, cols.get("ip", ""),
+            (seen_at, cols.get("ip", ""), cols.get("ip", ""),
              cols.get("hostname", ""), cols.get("hostname", ""),
              cols.get("nickname", ""), cols.get("nickname", ""),
              cols.get("manufacturer", ""), cols.get("manufacturer", ""),
