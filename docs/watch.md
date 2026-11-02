@@ -86,6 +86,40 @@ The OUI table: the image ships nmap's prefix file. For the full IEEE table
 press *Download it* in the tab or `POST /api/watch/oui/update`; it is saved in
 the data volume.
 
+## Labelling and eero nicknames
+
+The label dialog has *Also set as eero nickname*. With it on, the name is
+written to eero as the device nickname, so the eero app, the Devices tab and
+the Watch tab all show the same name. It is on by default for devices eero
+has a record of. If the eero write fails (not logged in, dry-run mode, demo
+mode) the local name is still saved and the error is shown.
+
+Suggested convention: room, fixture, kind. "Kitchen – Island dimmer",
+"Garage – Exterior lights switch". Owner for who it belongs to, notes for
+brand and model.
+
+## Identify mode
+
+Cloud-only smart switches and plugs expose nothing locally, so the only way
+to tie a row to a wall plate is behaviour. *Start identify mode* probes every
+unnamed device that has an address every 2 seconds (TCP connect to port 80;
+an open port or a reset both count as alive, so it works for devices that
+drop ping). Cut power to one device: the air-gap tab under the paddle of a
+smart switch, unplug a smart plug, or flip its breaker. After two missed
+probes the row turns red and jumps to the top. Type the name, press Enter.
+The device is named, trusted, the eero nickname is written, and the row
+leaves the list. Restore power and move to the next one. Mode stops itself
+after 30 minutes.
+
+The backend must be on the same LAN as the devices (host networking in
+Docker). For Tuya-platform switches (Feit, Smart Life, Tuya Smart) the
+vendor app also shows each device's MAC and IP under Device Information,
+which can be matched to the inventory without touching the wall.
+
+Endpoints: `GET /watch/identify`, `POST /watch/identify/start` (optional
+`{"macs": [...]}`), `POST /watch/identify/stop`,
+`DELETE /watch/identify/{mac}`.
+
 ## Probe
 
 The probe button runs an unprivileged nmap TCP scan of the device against

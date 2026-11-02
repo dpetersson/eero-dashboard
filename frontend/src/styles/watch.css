@@ -74,3 +74,17 @@
 .watch-cross-summary { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 10px; line-height: 1.5; }
 .watch-cross-summary strong { color: var(--text); }
 .watch-cross-summary .btn-text { padding: 0; font-size: inherit; }
+
+/* Identify mode */
+.identify-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+.identify-dot.alive { background: var(--green); box-shadow: 0 0 6px rgba(var(--green-rgb), 0.6); }
+.identify-dot.dark { background: var(--red); box-shadow: 0 0 8px rgba(var(--red-rgb), 0.8); animation: identify-pulse 1s ease-in-out infinite; }
+@keyframes identify-pulse { 50% { opacity: 0.4; } }
+.identify-row-dark td { background: rgba(var(--red-rgb), 0.10); }
+.identify-row-silent td { opacity: 0.55; }
+.identify-name-cell { display: flex; gap: 6px; align-items: center; min-width: 260px; }
+.identify-name-cell input {
+  flex: 1; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 6px 8px; color: var(--text); font-size: 0.82rem;
+}
+.section-header .btn-action { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; width: auto; }

@@ -422,3 +422,97 @@ class BaselineFallbackTests(WatchStoreBase):
         self.assertEqual(result["new"], [])
         self.assertTrue(store.get_device("aa:bb:cc:dd:ee:09")["trusted"])
         self.assertIsNotNone(store.get_meta("baseline_at:net1"))
+
+
+class IdentifyTests(WatchStoreBase):
+    def tearDown(self):
+        from features.watch import identify
+        identify.set_prober(None)
+        asyncio_run(identify.stop())
+        super().tearDown()
+
+    def test_dark_detection_and_candidates(self):
+        from features.watch import identify
+        service.poll("net1", [_dev("aa:bb:cc:dd:ee:01", ip="192.168.7.10", hostname="esp123456"),
+                              _dev("aa:bb:cc:dd:ee:02", ip="192.168.7.11", hostname="esp654321"),
+                              _dev("aa:bb:cc:dd:ee:03", ip="192.168.7.12", hostname="named-one")]
+                     + service.nodes_as_devices([{"mac_address": "98:ed:7e:00:00:01", "ip_address": "192.168.7.1", "location": "Hall"}]))
+        store.label_device("aa:bb:cc:dd:ee:03", name="Kitchen lamp")
+        cands = service.identify_candidates("net1")
+        self.assertEqual([c["mac"] for c in cands], ["aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"])  # named + node excluded
+        alive = {"192.168.7.10": True, "192.168.7.11": True}
+        identify.set_prober(lambda ip: alive[ip])
+        asyncio_run(identify.start("net1", cands, run_loop=False))
+        asyncio_run(identify.probe_all())
+        st = identify.status()
+        self.assertTrue(all(t["alive"] for t in st["targets"]))
+        alive["192.168.7.11"] = False
+        asyncio_run(identify.probe_all())
+        self.assertEqual(identify.status()["dark_count"], 0)   # one miss is not dark yet
+        asyncio_run(identify.probe_all())
+        st = identify.status()
+        self.assertEqual(st["dark_count"], 1)
+        self.assertEqual(st["targets"][0]["mac"], "aa:bb:cc:dd:ee:02")  # dark rows sort first
+        self.assertTrue(st["targets"][0]["dark"])
+        alive["192.168.7.11"] = True
+        asyncio_run(identify.probe_all())
+        self.assertEqual(identify.status()["dark_count"], 0)
+        identify.remove("aa:bb:cc:dd:ee:02")
+        self.assertEqual(len(identify.status()["targets"]), 1)
+
+    def test_never_answering_device_is_not_dark(self):
+        from features.watch import identify
+        identify.set_prober(lambda ip: ip == "192.168.7.10")
+        asyncio_run(identify.start("net1", [{"mac": "aa:bb:cc:dd:ee:01", "ip": "192.168.7.10"},
+                                            {"mac": "aa:bb:cc:dd:ee:02", "ip": "192.168.7.11"}], run_loop=False))
+        for _ in range(3):
+            asyncio_run(identify.probe_all())
+        st = {t["mac"]: t for t in identify.status()["targets"]}
+        self.assertTrue(st["aa:bb:cc:dd:ee:01"]["alive"])
+        self.assertFalse(st["aa:bb:cc:dd:ee:02"]["dark"])
+        self.assertTrue(st["aa:bb:cc:dd:ee:02"]["never_answered"])
+        self.assertEqual(identify.status()["dark_count"], 0)
+
+    def test_candidates_sort_with_mixed_address_families(self):
+        service.poll("net1", [_dev("aa:bb:cc:dd:ee:01", ip="192.168.7.20"),
+                              _dev("aa:bb:cc:dd:ee:02", ip="fd00::1"),
+                              _dev("aa:bb:cc:dd:ee:03", ip="192.168.7.5")])
+        cands = service.identify_candidates("net1")
+        self.assertEqual([c["ip"] for c in cands], ["192.168.7.5", "192.168.7.20", "fd00::1"])
+
+    def test_explicit_mac_list(self):
+        service.poll("net1", [_dev("aa:bb:cc:dd:ee:01", ip="192.168.7.10"), _dev("aa:bb:cc:dd:ee:02", ip="192.168.7.11")])
+        store.label_device("aa:bb:cc:dd:ee:01", name="already named")
+        cands = service.identify_candidates("net1", ["AA:BB:CC:DD:EE:01"])
+        self.assertEqual([c["mac"] for c in cands], ["aa:bb:cc:dd:ee:01"])  # explicit list may include named
+
+
+class NicknameWriteThroughTests(WatchStoreBase):
+    def test_label_writes_eero_nickname(self):
+        from unittest.mock import AsyncMock
+        import core.client as cc
+        from features.devices import service as devices_service
+        service.poll("net1", [_dev("aa:bb:cc:dd:ee:01", url="/2.2/devices/4242")])
+        fake = AsyncMock(); fake.is_authenticated = True
+        with patch.object(cc, "ensure_client", AsyncMock(return_value=fake)), \
+             patch.object(devices_service, "set_device_nickname", AsyncMock(return_value={})) as setter:
+            res = asyncio_run(service.set_eero_nickname("net1", store.get_device("aa:bb:cc:dd:ee:01"), "Hall switch"))
+        self.assertEqual(res, {"ok": True})
+        setter.assert_awaited_once()
+        self.assertEqual(setter.await_args.args[2], "4242")          # device id from the eero URL
+        self.assertEqual(setter.await_args.args[3], "Hall switch")
+        self.assertEqual(store.get_device("aa:bb:cc:dd:ee:01")["nickname"], "Hall switch")
+
+    def test_label_reports_eero_failure_but_keeps_local_name(self):
+        from unittest.mock import AsyncMock
+        import core.client as cc
+        service.poll("net1", [_dev("aa:bb:cc:dd:ee:01")])
+        fake = AsyncMock(); fake.is_authenticated = False
+        with patch.object(cc, "ensure_client", AsyncMock(return_value=fake)):
+            res = asyncio_run(service.set_eero_nickname("net1", store.get_device("aa:bb:cc:dd:ee:01"), "x"))
+        self.assertFalse(res["ok"]); self.assertIn("not logged in", res["error"])
+
+
+def asyncio_run(coro):
+    import asyncio
+    return asyncio.run(coro)

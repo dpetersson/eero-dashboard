@@ -479,6 +479,55 @@ def summary(network_id: str) -> dict[str, Any]:
     }
 
 
+async def set_eero_nickname(network_id: str, rec: dict, name: str) -> dict[str, Any]:
+    """Write the label to eero as the device nickname so the eero app shows it too."""
+    from core import client as core_client
+    from core.demo import is_demo_mode
+    if is_demo_mode():
+        return {"ok": False, "error": "demo mode: nothing is written to eero"}
+    client = await core_client.ensure_client()
+    if not client.is_authenticated:
+        return {"ok": False, "error": "not logged in to eero"}
+    device_id = (rec.get("device_url") or "").rstrip("/").split("/")[-1] or rec["mac"]
+    from features.devices import service as devices_service
+    try:
+        await devices_service.set_device_nickname(client, network_id, device_id, name)
+    except Exception as e:  # HTTPException from translate_errors or dry-run block
+        detail = getattr(e, "detail", None)
+        msg = detail.get("message") if isinstance(detail, dict) else (detail or str(e))
+        return {"ok": False, "error": str(msg)}
+    store.set_nickname(rec["mac"], name)
+    return {"ok": True}
+
+
+def identify_candidates(network_id: str, macs: list[str] | None = None) -> list[dict[str, Any]]:
+    """Unnamed devices with an address, or an explicit MAC list. eero nodes are excluded."""
+    s = summary(network_id)
+    by_mac = {d["mac"]: d for d in store.list_devices(network_id)}
+    for d in s["untrusted"] + s["new"] + s["uploaders"] + s["cross"]["lan_only"]:
+        by_mac[d["mac"]] = d
+    wanted = {norm_mac(m) for m in macs} if macs else None
+    out = []
+    for d in by_mac.values():
+        ip = d.get("last_ip") or d.get("lan_ip")
+        if not ip or d.get("device_type") == "eero_node":
+            continue
+        if wanted is not None:
+            if d["mac"] not in wanted:
+                continue
+        elif d.get("name"):
+            continue
+        out.append({"mac": d["mac"], "ip": ip, "vendor": best_vendor(d),
+                    "label": d.get("name") or d.get("nickname") or d.get("hostname") or d.get("lan_hostname") or ""})
+    def _key(t: dict) -> tuple:
+        try:
+            addr = ipaddress.ip_address(t["ip"])
+            return (addr.version, int(addr))
+        except ValueError:
+            return (9, t["ip"])
+    return sorted(out, key=_key)
+
+
 async def probe_device(mac: str) -> dict[str, Any]:
     rec = store.get_device(mac)
     if rec is None:

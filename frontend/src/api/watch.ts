@@ -118,12 +118,52 @@ export const getWatchDevices = (networkId: string) =>
 export const getWatchDevice = (networkId: string, mac: string) =>
   request<WatchDevice>(`/networks/${networkId}/watch/devices/${encodeURIComponent(mac)}`);
 
+export interface IdentifyTarget {
+  mac: string;
+  ip: string;
+  label: string;
+  vendor: string;
+  name: string;
+  trusted: boolean;
+  alive: boolean;
+  dark: boolean;
+  never_answered: boolean;
+  dark_for_s: number | null;
+  last_alive_s: number | null;
+  probes: number;
+}
+
+export interface IdentifyStatus {
+  active: boolean;
+  network_id: string | null;
+  elapsed_s: number | null;
+  interval_s: number;
+  auto_stop_s: number;
+  targets: IdentifyTarget[];
+  dark_count: number;
+}
+
+export const getIdentifyStatus = (networkId: string) =>
+  request<IdentifyStatus>(`/networks/${networkId}/watch/identify`);
+
+export const startIdentify = (networkId: string, macs?: string[]) =>
+  request<IdentifyStatus>(`/networks/${networkId}/watch/identify/start`, {
+    method: 'POST',
+    body: JSON.stringify(macs ? { macs } : {}),
+  });
+
+export const stopIdentify = (networkId: string) =>
+  request<IdentifyStatus>(`/networks/${networkId}/watch/identify/stop`, { method: 'POST' });
+
+export const removeIdentifyTarget = (networkId: string, mac: string) =>
+  request<IdentifyStatus>(`/networks/${networkId}/watch/identify/${encodeURIComponent(mac)}`, { method: 'DELETE' });
+
 export const labelWatchDevice = (
   networkId: string,
   mac: string,
-  body: { name?: string; owner?: string; notes?: string; trusted?: boolean },
+  body: { name?: string; owner?: string; notes?: string; trusted?: boolean; eero_nickname?: boolean },
 ) =>
-  request<WatchDevice>(`/networks/${networkId}/watch/devices/${encodeURIComponent(mac)}`, {
+  request<WatchDevice & { eero?: { ok: boolean; error?: string } | null }>(`/networks/${networkId}/watch/devices/${encodeURIComponent(mac)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });

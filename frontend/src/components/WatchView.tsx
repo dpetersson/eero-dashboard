@@ -1,10 +1,10 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ShieldAlert, ShieldCheck, RefreshCw, Radar, Ban, Pencil, Trash2, Network } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, RefreshCw, Radar, Ban, Pencil, Trash2, Network, Crosshair, Square } from 'lucide-react';
 
 import * as api from '../api';
 import { useFetch } from '../hooks/useFetch';
-import type { WatchDevice, WatchEvent, WatchSummary } from '../api/watch';
+import type { IdentifyStatus, WatchDevice, WatchEvent, WatchSummary } from '../api/watch';
 
 interface WatchViewProps {
   networkId: string;
@@ -18,6 +18,8 @@ const EVENT_LABEL: Record<string, string> = {
   trusted: 'Trusted',
   untrusted: 'Untrusted',
   probe: 'Probe',
+  nickname: 'eero nickname',
+  new_device_lan: 'On wire, not in eero',
 };
 
 function ago(iso: string): string {
@@ -43,6 +45,8 @@ export default function WatchView({ networkId }: WatchViewProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [editing, setEditing] = useState<WatchDevice | null>(null);
   const [probeResult, setProbeResult] = useState<{ mac: string; result: api.WatchProbe } | null>(null);
+  const [identify, setIdentify] = useState<IdentifyStatus | null>(null);
+  const [identifyNames, setIdentifyNames] = useState<Record<string, string>>({});
 
   const run = useCallback(async (key: string, fn: () => Promise<unknown>) => {
     setBusy(key);
@@ -76,6 +80,34 @@ export default function WatchView({ networkId }: WatchViewProps) {
     if (r.skipped) throw new Error(`LAN scan skipped: ${r.reason}`);
   });
   const fetchOui = () => run('oui', () => api.updateOui());
+
+  const saveLabel = useCallback(async (mac: string, body: { name?: string; owner?: string; notes?: string; trusted?: boolean; eero_nickname?: boolean }) => {
+    const res = await api.labelWatchDevice(networkId, mac, body);
+    if (body.eero_nickname && res.eero && !res.eero.ok) {
+      throw new Error(`Saved locally, but eero nickname was not set: ${res.eero.error}`);
+    }
+    return res;
+  }, [networkId]);
+
+  // Identify mode: poll while active.
+  useEffect(() => {
+    if (!identify?.active) return;
+    const id = window.setInterval(() => {
+      api.getIdentifyStatus(networkId).then(setIdentify).catch(() => {});
+    }, Math.max(1000, (identify.interval_s || 2) * 1000));
+    return () => window.clearInterval(id);
+  }, [identify?.active, identify?.interval_s, networkId]);
+  useEffect(() => {
+    api.getIdentifyStatus(networkId).then(setIdentify).catch(() => {});
+  }, [networkId]);
+  const startIdentify = () => run('identify', async () => setIdentify(await api.startIdentify(networkId)));
+  const stopIdentify = () => run('identify', async () => setIdentify(await api.stopIdentify(networkId)));
+  const nameIdentified = (mac: string) => run(`identify:${mac}`, async () => {
+    const name = (identifyNames[mac] || '').trim();
+    if (!name) throw new Error('Enter a name first');
+    await saveLabel(mac, { name, trusted: true, eero_nickname: true });
+    setIdentify(await api.removeIdentifyTarget(networkId, mac));
+  });
 
   if (loading && !data) return <div className="card loading-card"><div className="spinner" /> Loading watch data…</div>;
   if (error && !data) return <div className="card error-card">Watch data unavailable: {error}</div>;
@@ -118,6 +150,66 @@ export default function WatchView({ networkId }: WatchViewProps) {
       </div>
 
       {actionError && <div className="card error-card">{actionError}</div>}
+
+      <div className="watch-section">
+        <div className="section-header">
+          <h2><Crosshair size={16} />Identify devices {identify?.active && <span className="badge">{identify.targets.length}</span>}</h2>
+          {identify?.active ? (
+            <button className="btn-action btn-sm" onClick={stopIdentify} disabled={busy === 'identify'}><Square size={14} /> Stop</button>
+          ) : (
+            <button className="btn-action btn-sm" onClick={startIdentify} disabled={busy === 'identify'}
+              title="Probe every unnamed device every 2 s and show which one stops answering">
+              <Crosshair size={14} /> Start identify mode
+            </button>
+          )}
+        </div>
+        {identify?.active ? (
+          <div className="card">
+            <p className="watch-hint">
+              Probing {identify.targets.length} unnamed devices every {identify.interval_s}s
+              {identify.elapsed_s != null ? ` · ${Math.floor(identify.elapsed_s / 60)}m ${identify.elapsed_s % 60}s` : ''}.
+              Cut power to one device (air-gap tab on a smart switch, unplug it, or flip its breaker). The row that goes dark is it:
+              type its name and save. The name is written to eero as the nickname too. Stops by itself after {Math.round(identify.auto_stop_s / 60)} minutes.
+            </p>
+            <table className="watch-table">
+              <thead><tr><th></th><th>Device</th><th>IP</th><th>Vendor</th><th>Status</th><th>Name it</th></tr></thead>
+              <tbody>
+                {identify.targets.map((t) => (
+                  <tr key={t.mac} className={t.dark ? 'identify-row-dark' : t.never_answered ? 'identify-row-silent' : ''}>
+                    <td><span className={`identify-dot ${t.dark ? 'dark' : t.alive ? 'alive' : 'unknown'}`} /></td>
+                    <td>
+                      <div className="watch-name">{t.label || t.mac}</div>
+                      <div className="watch-sub">{t.mac}</div>
+                    </td>
+                    <td>{t.ip}</td>
+                    <td>{t.vendor || <span className="text-dim">unknown</span>}</td>
+                    <td>
+                      {t.dark ? <span className="status-red">dark for {t.dark_for_s}s</span>
+                        : t.never_answered ? <span className="text-dim">never answered</span>
+                        : t.alive ? <span className="status-green">answering</span>
+                        : <span className="text-dim">waiting…</span>}
+                    </td>
+                    <td className="identify-name-cell">
+                      <input
+                        value={identifyNames[t.mac] ?? ''}
+                        placeholder={t.dark ? 'e.g. Kitchen – Island dimmer' : ''}
+                        onChange={(e) => setIdentifyNames({ ...identifyNames, [t.mac]: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === 'Enter') nameIdentified(t.mac); }}
+                      />
+                      <button className="btn-primary btn-sm" disabled={busy === `identify:${t.mac}` || !(identifyNames[t.mac] || '').trim()} onClick={() => nameIdentified(t.mac)}>Save</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="card empty-state">
+            Start identify mode to work out which physical device each unnamed row is. Named devices are trusted and the name is written
+            to eero as the device nickname, so the eero app shows it too.
+          </div>
+        )}
+      </div>
 
       <Section title="Untrusted devices" icon={<ShieldAlert size={16} />} count={data.untrusted.length}
         empty="Every known device is trusted.">
@@ -234,7 +326,7 @@ export default function WatchView({ networkId }: WatchViewProps) {
         <LabelDialog
           device={editing}
           onClose={() => setEditing(null)}
-          onSave={(body) => run(`label:${editing.mac}`, () => api.labelWatchDevice(networkId, editing.mac, body)).then(() => setEditing(null))}
+          onSave={(body) => run(`label:${editing.mac}`, () => saveLabel(editing.mac, body)).then(() => setEditing(null))}
         />
       )}
 
@@ -352,11 +444,12 @@ function DeviceTable({ devices, busy, probeAvailable, onTrust, onBlock, onProbe,
   );
 }
 
-function LabelDialog({ device, onClose, onSave }: { device: WatchDevice; onClose: () => void; onSave: (body: { name: string; owner: string; notes: string; trusted: boolean }) => void }) {
+function LabelDialog({ device, onClose, onSave }: { device: WatchDevice; onClose: () => void; onSave: (body: { name: string; owner: string; notes: string; trusted: boolean; eero_nickname: boolean }) => void }) {
   const [name, setName] = useState(device.name);
   const [owner, setOwner] = useState(device.owner);
   const [notes, setNotes] = useState(device.notes);
   const [trusted, setTrusted] = useState(device.trusted);
+  const [eeroNickname, setEeroNickname] = useState(!!device.device_url);
   return createPortal(
     <div className="watch-dialog-backdrop" onClick={onClose}>
       <div className="watch-dialog card" onClick={(e) => e.stopPropagation()}>
@@ -366,9 +459,13 @@ function LabelDialog({ device, onClose, onSave }: { device: WatchDevice; onClose
         <label>Owner<input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder="house" /></label>
         <label>Notes<input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="ok: backup NAS uploads overnight" /></label>
         <label className="watch-check"><input type="checkbox" checked={trusted} onChange={(e) => setTrusted(e.target.checked)} /> Trusted</label>
+        <label className="watch-check" title={device.device_url ? 'Writes the name to eero so the eero app shows it' : 'eero has no record of this device yet'}>
+          <input type="checkbox" checked={eeroNickname} disabled={!device.device_url} onChange={(e) => setEeroNickname(e.target.checked)} />
+          Also set as eero nickname{device.nickname ? ` (currently "${device.nickname}")` : ''}
+        </label>
         <div className="watch-dialog-actions">
           <button className="btn-cancel btn-sm" onClick={onClose}>Cancel</button>
-          <button className="btn-primary btn-sm" onClick={() => onSave({ name, owner, notes, trusted })}>Save</button>
+          <button className="btn-primary btn-sm" onClick={() => onSave({ name, owner, notes, trusted, eero_nickname: eeroNickname && !!name.trim() })}>Save</button>
         </div>
       </div>
     </div>,

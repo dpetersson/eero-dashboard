@@ -6,6 +6,11 @@ class LabelRequest(BaseModel):
     owner: str | None = None
     notes: str | None = None
     trusted: bool | None = None
+    eero_nickname: bool = False   # also write `name` to eero as the device nickname
+
+
+class IdentifyStartRequest(BaseModel):
+    macs: list[str] | None = None   # None = every unnamed online device with an address
 
 
 class LanScanDevice(BaseModel):

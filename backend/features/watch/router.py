@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from . import lanscan, poller, schemas, service, store
+from . import identify, lanscan, poller, schemas, service, store
 
 router = APIRouter(prefix="/api", tags=["watch"])
 
@@ -50,6 +50,14 @@ async def watch_label(network_id: str, mac: str, req: schemas.LabelRequest):
     if req.trusted is not None and req.trusted != rec["trusted"]:
         store.add_event(network_id, "trusted" if req.trusted else "untrusted", rec["mac"],
                         service.display_name(updated or rec))
+    eero_result = None
+    if req.eero_nickname and req.name:
+        eero_result = await service.set_eero_nickname(network_id, rec, req.name)
+        if eero_result.get("ok"):
+            store.add_event(network_id, "nickname", rec["mac"], "eero nickname set to %r" % req.name)
+        updated = store.get_device(rec["mac"])
+    if updated is not None:
+        updated["eero"] = eero_result
     return updated
 
 
@@ -122,6 +130,41 @@ async def oui_update():
     except Exception as e:
         raise HTTPException(status_code=502, detail="OUI download failed: %s" % e)
     return {"bytes": size}
+
+
+# --------------------------------------------------------------------------- identify mode
+
+@router.get("/networks/{network_id}/watch/identify")
+async def identify_status(network_id: str):
+    st = identify.status()
+    names = {d["mac"]: d for d in store.list_devices(network_id)} if st["targets"] else {}
+    for t in st["targets"]:
+        rec = names.get(t["mac"]) or {}
+        t["name"] = rec.get("name", "")
+        t["trusted"] = bool(rec.get("trusted"))
+    return st
+
+
+@router.post("/networks/{network_id}/watch/identify/start")
+async def identify_start(network_id: str, req: schemas.IdentifyStartRequest | None = None):
+    targets = service.identify_candidates(network_id, req.macs if req else None)
+    if not targets:
+        raise HTTPException(status_code=409, detail="No candidate devices with an address to probe")
+    return await identify.start(network_id, targets)
+
+
+@router.post("/networks/{network_id}/watch/identify/stop")
+async def identify_stop(network_id: str):
+    await identify.stop()
+    return identify.status()
+
+
+@router.delete("/networks/{network_id}/watch/identify/{mac}")
+async def identify_remove(network_id: str, mac: str):
+    norm = service.norm_mac(mac)
+    if norm:
+        identify.remove(norm)
+    return identify.status()
 
 
 def _device_or_404(mac: str) -> dict:

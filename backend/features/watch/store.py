@@ -306,6 +306,13 @@ def label_device(mac: str, *, name: str | None = None, owner: str | None = None,
     return get_device(mac)
 
 
+def set_nickname(mac: str, nickname: str) -> None:
+    with _lock:
+        db = _db()
+        db.execute("UPDATE devices SET nickname = ? WHERE mac = ?", (nickname, mac))
+        db.commit()
+
+
 def mark_eero_node(mac: str, name: str) -> None:
     """A LAN-side interface of an eero node: trusted, typed, named, never 'new'."""
     with _lock:
